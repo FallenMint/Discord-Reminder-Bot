@@ -27,4 +27,4 @@ jobs:
 
       - run: pip install requests pytz
 
-      - run: python bot.py
+      - run: python ReminderBot.py
