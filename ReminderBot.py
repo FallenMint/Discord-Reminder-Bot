@@ -1,9 +1,12 @@
 import requests
-from datetime import datetime, date
+from datetime import datetime, date, timedelta
 import pytz
 import os
+import json
 
 WEBHOOK_URL = os.getenv("WEBHOOK_URL")
+
+# ================= CONFIG =================
 
 CYCLE_START_DATE = date(2025, 12, 22)
 CYCLE_LENGTH = 14
@@ -18,7 +21,26 @@ MENTION_SCHEDULE = {
     "Sunday":    [1141335656044429322],
 }
 
-# UK time
+OVERRIDE_FILE = "overrides.json"
+
+# ================= JSON STORAGE =================
+
+def load_overrides():
+    try:
+        with open(OVERRIDE_FILE, "r") as f:
+            raw = json.load(f)
+            return {date.fromisoformat(k): v for k, v in raw.items()}
+    except FileNotFoundError:
+        return {}
+
+def save_overrides(data):
+    with open(OVERRIDE_FILE, "w") as f:
+        json.dump({k.isoformat(): v for k, v in data.items()}, f, indent=2)
+
+TEMP_CHANGES = load_overrides()
+
+# ================= TIME =================
+
 uk = pytz.timezone("Europe/London")
 now = datetime.now(uk)
 today = now.date()
@@ -27,12 +49,28 @@ weekday = now.strftime("%A")
 print("Triggered at UK time:", now)
 print("Weekday:", weekday)
 
-# Calculate AA cycle
+# ================= CLEAN OLD OVERRIDES =================
+
+def cleanup_overrides():
+    for d in list(TEMP_CHANGES):
+        if d < today:
+            del TEMP_CHANGES[d]
+    save_overrides(TEMP_CHANGES)
+
+cleanup_overrides()
+
+# ================= ROTATION LOGIC =================
+
 days_since_start = (today - CYCLE_START_DATE).days
 cycle_day = (days_since_start % CYCLE_LENGTH) + 1
 training_code = f"AA{cycle_day:02d}"
 
-users = MENTION_SCHEDULE.get(weekday, [])
+def get_users_for_date(d):
+    if d in TEMP_CHANGES:
+        return TEMP_CHANGES[d]
+    return MENTION_SCHEDULE.get(d.strftime("%A"), [])
+
+users = get_users_for_date(today)
 mentions = " ".join(f"<@{u}>" for u in users)
 
 msg = f"⏰ **Training Reminder {training_code}** {mentions}"
