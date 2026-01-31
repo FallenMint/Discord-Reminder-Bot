@@ -10,6 +10,9 @@ on:
 
   workflow_dispatch:
 
+permissions:
+  contents: write   # ✅ REQUIRED to push overrides.json
+
 jobs:
   run:
     runs-on: ubuntu-latest
@@ -26,3 +29,12 @@ jobs:
 
       - run: pip install requests pytz
       - run: python ReminderBot.py
+
+      # ✅ Commit JSON overrides back to GitHub
+      - name: Commit rota overrides
+        run: |
+          git config --global user.name "Rota Bot"
+          git config --global user.email "bot@github"
+          git add overrides.json
+          git commit -m "Update rota overrides" || exit 0
+          git push
