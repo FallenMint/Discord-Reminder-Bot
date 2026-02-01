@@ -1,18 +1,13 @@
-import requests
-from datetime import datetime, date
+import discord
+from discord import app_commands
+from datetime import datetime, date, timedelta
 import pytz
-import os
 import json
-import time
-import sys
+import os
 
 # ================= CONFIG =================
 
-WEBHOOK_URL = os.getenv("WEBHOOK_URL")
-if not WEBHOOK_URL:
-    print("ERROR: WEBHOOK_URL is not set. Please export it before running the bot.")
-    sys.exit(1)
-
+BOT_TOKEN = os.getenv("DISCORD_BOT_TOKEN")  # export this in Linux
 CYCLE_START_DATE = date(2025, 12, 22)
 CYCLE_LENGTH = 14
 
@@ -26,12 +21,13 @@ MENTION_SCHEDULE = {
     "Sunday":    [1141335656044429322],
 }
 
-# Send time rules
 SEND_AT_MIDNIGHT = ["Tuesday", "Wednesday", "Saturday", "Sunday"]
 SEND_AT_5AM = ["Monday", "Thursday", "Friday"]
 
 OVERRIDE_FILE = "overrides.json"
 LAST_SENT_FILE = "last_sent.txt"
+
+uk = pytz.timezone("Europe/London")
 
 # ================= JSON STORAGE =================
 
@@ -40,7 +36,7 @@ def load_overrides():
         with open(OVERRIDE_FILE, "r") as f:
             raw = json.load(f)
             return {date.fromisoformat(k): v for k, v in raw.items()}
-    except FileNotFoundError:
+    except:
         return {}
 
 def save_overrides(data):
@@ -49,100 +45,80 @@ def save_overrides(data):
 
 TEMP_CHANGES = load_overrides()
 
-# ================= TIME =================
-
-uk = pytz.timezone("Europe/London")
-
-def now_uk():
-    return datetime.now(uk)
-
-# ================= LAST SENT TRACKING =================
-
-def get_last_sent():
-    try:
-        with open(LAST_SENT_FILE, "r") as f:
-            return date.fromisoformat(f.read().strip())
-    except:
-        return None
-
-def set_last_sent(d):
-    with open(LAST_SENT_FILE, "w") as f:
-        f.write(d.isoformat())
-
-# ================= CLEAN OLD OVERRIDES =================
-
-def cleanup_overrides():
-    today = now_uk().date()
-    for d in list(TEMP_CHANGES):
-        if d < today:
-            del TEMP_CHANGES[d]
-    save_overrides(TEMP_CHANGES)
-
-cleanup_overrides()
-
 # ================= ROTATION LOGIC =================
 
 def get_cycle_day(d):
-    days_since_start = (d - CYCLE_START_DATE).days
-    return (days_since_start % CYCLE_LENGTH) + 1
+    return ((d - CYCLE_START_DATE).days % CYCLE_LENGTH) + 1
 
 def get_users_for_date(d):
-    if d in TEMP_CHANGES:
-        return TEMP_CHANGES[d]
-    return MENTION_SCHEDULE.get(d.strftime("%A"), [])
+    return TEMP_CHANGES.get(d, MENTION_SCHEDULE.get(d.strftime("%A"), []))
 
 def build_message(d):
     cycle_day = get_cycle_day(d)
-    training_code = f"AA{cycle_day:02d}"
+    code = f"AA{cycle_day:02d}"
     users = get_users_for_date(d)
     mentions = " ".join(f"<@{u}>" for u in users)
-    return f"⏰ **Training Reminder {training_code}** {mentions}", users
+    return f"⏰ **Training Reminder {code}** {mentions}", users
 
-# ================= DISCORD SENDING =================
+# ================= DISCORD BOT =================
 
-def send_discord(msg, users):
-    try:
-        r = requests.post(
-            WEBHOOK_URL,
-            json={
-                "content": msg,
-                "allowed_mentions": {"users": users}
-            },
-            timeout=10
-        )
-        print(f"Discord status: {r.status_code}")
-    except Exception as e:
-        print(f"Discord send error: {e}")
+intents = discord.Intents.default()
+bot = discord.Client(intents=intents)
+tree = app_commands.CommandTree(bot)
 
-# ================= MAIN LOOP =================
+# ================= SLASH COMMANDS =================
 
-def main_loop():
-    print("Bot started. Running 24/7...")
+@tree.command(name="next", description="Show who is next in the rota")
+async def next_cmd(interaction: discord.Interaction):
+    today = datetime.now(uk).date()
+    users = get_users_for_date(today)
+    await interaction.response.send_message(f"Next: {users}", ephemeral=True)
 
-    while True:
-        now_time = now_uk()
-        today = now_time.date()
-        weekday = now_time.strftime("%A")
-        last_sent = get_last_sent()
+@tree.command(name="rota", description="Show the next 7 days rota")
+async def rota_cmd(interaction: discord.Interaction):
+    today = datetime.now(uk).date()
+    msg = ""
+    for i in range(7):
+        d = today + timedelta(days=i)
+        users = get_users_for_date(d)
+        msg += f"{d.strftime('%A %d %b')}: {users}\n"
+    await interaction.response.send_message(msg, ephemeral=True)
 
-        # Decide send hour for today
-        send_hour = None
-        if weekday in SEND_AT_MIDNIGHT:
-            send_hour = 0
-        elif weekday in SEND_AT_5AM:
-            send_hour = 5
+@tree.command(name="change", description="Change rota for one day")
+async def change_cmd(interaction: discord.Interaction, date_str: str, user_id: int):
+    d = date.fromisoformat(date_str)
+    TEMP_CHANGES[d] = [user_id]
+    save_overrides(TEMP_CHANGES)
+    await interaction.response.send_message(f"Override set for {d}: {user_id}", ephemeral=True)
 
-        # Send only once per day
-        if send_hour is not None and now_time.hour == send_hour and last_sent != today:
-            msg, users = build_message(today)
-            print(f"Triggered at UK time: {now_time}")
-            print(f"Sending: {msg}")
-            send_discord(msg, users)
+# ================= AUTO REMINDER LOOP =================
 
-            set_last_sent(today)
-            time.sleep(3600)  # sleep 1 hour to avoid duplicates
-        else:
-            time.sleep(60)
+async def reminder_loop():
+    await bot.wait_until_ready()
+    channel = bot.get_channel(YOUR_CHANNEL_ID_HERE)  # CHANGE THIS
 
-if __name__ == "__main__":
-    main_loop()
+    last_sent = None
+
+    while not bot.is_closed():
+        now = datetime.now(uk)
+        today = now.date()
+        weekday = now.strftime("%A")
+
+        send_hour = 0 if weekday in SEND_AT_MIDNIGHT else 5 if weekday in SEND_AT_5AM else None
+
+        if send_hour is not None and now.hour == send_hour and last_sent != today:
+            msg, _ = build_message(today)
+            await channel.send(msg)
+            last_sent = today
+
+        await discord.utils.sleep_until((now + timedelta(minutes=1)).replace(second=0, microsecond=0))
+
+# ================= STARTUP =================
+
+@bot.event
+async def on_ready():
+    await tree.sync()
+    print(f"Logged in as {bot.user}")
+    bot.loop.create_task(reminder_loop())
+
+bot.run(BOT_TOKEN)
