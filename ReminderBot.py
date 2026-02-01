@@ -1,5 +1,5 @@
 import requests
-from datetime import datetime, date, timedelta
+from datetime import datetime, date
 import pytz
 import os
 import json
@@ -26,8 +26,12 @@ MENTION_SCHEDULE = {
     "Sunday":    [1141335656044429322],
 }
 
+# Send time rules
+SEND_AT_MIDNIGHT = ["Tuesday", "Wednesday", "Saturday", "Sunday"]
+SEND_AT_5AM = ["Monday", "Thursday", "Friday"]
+
 OVERRIDE_FILE = "overrides.json"
-SEND_HOUR = 5  # 24h format UK time when reminder should be sent
+LAST_SENT_FILE = "last_sent.txt"
 
 # ================= JSON STORAGE =================
 
@@ -51,6 +55,19 @@ uk = pytz.timezone("Europe/London")
 
 def now_uk():
     return datetime.now(uk)
+
+# ================= LAST SENT TRACKING =================
+
+def get_last_sent():
+    try:
+        with open(LAST_SENT_FILE, "r") as f:
+            return date.fromisoformat(f.read().strip())
+    except:
+        return None
+
+def set_last_sent(d):
+    with open(LAST_SENT_FILE, "w") as f:
+        f.write(d.isoformat())
 
 # ================= CLEAN OLD OVERRIDES =================
 
@@ -79,8 +96,7 @@ def build_message(d):
     training_code = f"AA{cycle_day:02d}"
     users = get_users_for_date(d)
     mentions = " ".join(f"<@{u}>" for u in users)
-    msg = f"⏰ **Training Reminder {training_code}** {mentions}"
-    return msg, users
+    return f"⏰ **Training Reminder {training_code}** {mentions}", users
 
 # ================= DISCORD SENDING =================
 
@@ -94,40 +110,39 @@ def send_discord(msg, users):
             },
             timeout=10
         )
-        if r.status_code != 204:
-            print(f"Warning: Discord returned {r.status_code}: {r.text}")
-        else:
-            print(f"Sent successfully at {now_uk()}")
-    except requests.exceptions.RequestException as e:
-        print(f"Error sending Discord message: {e}")
+        print(f"Discord status: {r.status_code}")
+    except Exception as e:
+        print(f"Discord send error: {e}")
 
 # ================= MAIN LOOP =================
 
 def main_loop():
     print("Bot started. Running 24/7...")
+
     while True:
         now_time = now_uk()
-        today_date = now_time.date()
+        today = now_time.date()
         weekday = now_time.strftime("%A")
+        last_sent = get_last_sent()
 
-        # Only send once per day at SEND_HOUR
-        if now_time.hour == SEND_HOUR:
-            msg, users = build_message(today_date)
+        # Decide send hour for today
+        send_hour = None
+        if weekday in SEND_AT_MIDNIGHT:
+            send_hour = 0
+        elif weekday in SEND_AT_5AM:
+            send_hour = 5
+
+        # Send only once per day
+        if send_hour is not None and now_time.hour == send_hour and last_sent != today:
+            msg, users = build_message(today)
             print(f"Triggered at UK time: {now_time}")
-            print(f"Weekday: {weekday}")
             print(f"Sending: {msg}")
             send_discord(msg, users)
 
-            # Wait 3600 seconds to avoid resending in the same hour
-            time.sleep(3600)
+            set_last_sent(today)
+            time.sleep(3600)  # sleep 1 hour to avoid duplicates
         else:
-            # Sleep 60 seconds and check again
             time.sleep(60)
 
 if __name__ == "__main__":
-    try:
-        main_loop()
-    except Exception as e:
-        print(f"Fatal error: {e}")
-        # Prevent crash; systemd will restart if configured
-        time.sleep(10)
+    main_loop()
