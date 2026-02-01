@@ -7,7 +7,8 @@ import os
 
 # ================= CONFIG =================
 
-BOT_TOKEN = os.getenv("DISCORD_BOT_TOKEN")  # export this in Linux
+BOT_TOKEN = os.getenv("BOT_TOKEN")
+  # export this in Linux
 CYCLE_START_DATE = date(2025, 12, 22)
 CYCLE_LENGTH = 14
 
@@ -122,4 +123,5 @@ async def on_ready():
     bot.loop.create_task(reminder_loop())
 
 bot.run(BOT_TOKEN)
+
 
