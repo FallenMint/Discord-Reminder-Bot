@@ -95,7 +95,7 @@ async def change_cmd(interaction: discord.Interaction, date_str: str, user_id: i
 
 async def reminder_loop():
     await bot.wait_until_ready()
-    channel = bot.get_channel(YOUR_CHANNEL_ID_HERE)  # CHANGE THIS
+    channel = bot.get_channel(1383751887051821147)  # CHANGE THIS
 
     last_sent = None
 
@@ -122,3 +122,4 @@ async def on_ready():
     bot.loop.create_task(reminder_loop())
 
 bot.run(BOT_TOKEN)
+
