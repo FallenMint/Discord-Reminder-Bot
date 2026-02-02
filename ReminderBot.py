@@ -11,6 +11,12 @@ import asyncio
 BOT_TOKEN = os.getenv("BOT_TOKEN")  # Must match systemd Environment
 CHANNEL_ID = 1383751887051821147  # CHANGE THIS
 
+# ROLE IDS THAT CAN CHANGE/CLEAR ROTA
+ALLOWED_ROLES = [
+    1381269885769875506,  # Support Role ID
+    1382475365557076029,  # Owners & Founders Role ID
+]
+
 CYCLE_START_DATE = date(2025, 12, 22)
 CYCLE_LENGTH = 14
 
@@ -48,7 +54,12 @@ def save_json(file, data):
 TEMP_CHANGES = {date.fromisoformat(k): v for k, v in load_json(OVERRIDE_FILE, {}).items()}
 LAST_SENT = load_json(LAST_SENT_FILE, {})
 
-# ================= ROTATION =================
+# ================= PERMISSION CHECK =================
+
+def has_permission(member: discord.Member):
+    return any(role.id in ALLOWED_ROLES for role in member.roles)
+
+# ================= ROTATION LOGIC =================
 
 def get_cycle_day(d):
     return ((d - CYCLE_START_DATE).days % CYCLE_LENGTH) + 1
@@ -80,6 +91,7 @@ async def next_cmd(interaction: discord.Interaction):
     mentions = " ".join(f"<@{u}>" for u in users)
     await interaction.response.send_message(f"Next: {mentions}", ephemeral=True)
 
+
 @tree.command(name="rota", description="Show the next 7 days rota")
 async def rota_cmd(interaction: discord.Interaction):
     today = datetime.now(uk).date()
@@ -91,9 +103,17 @@ async def rota_cmd(interaction: discord.Interaction):
         msg += f"{d.strftime('%A %d %b')}: {mentions}\n"
     await interaction.response.send_message(msg, ephemeral=True)
 
+
+# ===== CHANGE (ADMIN ONLY, DATE PICKER + USER PICKER) =====
+
 @tree.command(name="change", description="Override rota for one day")
 @app_commands.describe(date="Pick date", user="Pick user")
 async def change_cmd(interaction: discord.Interaction, date: str, user: discord.User):
+
+    if not isinstance(interaction.user, discord.Member) or not has_permission(interaction.user):
+        await interaction.response.send_message("❌ No permission.", ephemeral=True)
+        return
+
     try:
         d = datetime.fromisoformat(date).date()
     except:
@@ -108,6 +128,39 @@ async def change_cmd(interaction: discord.Interaction, date: str, user: discord.
         ephemeral=True
     )
 
+
+# ===== CLEAR (ADMIN ONLY, UK DATE FORMAT) =====
+
+@tree.command(name="clear", description="Clear rota override (DD/MM/YYYY)")
+@app_commands.describe(date="Date in DD/MM/YYYY")
+async def clear_cmd(interaction: discord.Interaction, date: str):
+
+    if not isinstance(interaction.user, discord.Member) or not has_permission(interaction.user):
+        await interaction.response.send_message("❌ No permission.", ephemeral=True)
+        return
+
+    try:
+        d = datetime.strptime(date, "%d/%m/%Y").date()
+    except:
+        await interaction.response.send_message(
+            "❌ Invalid date. Use DD/MM/YYYY (example: 05/02/2026)",
+            ephemeral=True
+        )
+        return
+
+    if d in TEMP_CHANGES:
+        del TEMP_CHANGES[d]
+        save_json(OVERRIDE_FILE, {k.isoformat(): v for k, v in TEMP_CHANGES.items()})
+        await interaction.response.send_message(
+            f"✅ Override cleared for {d.strftime('%d/%m/%Y')}",
+            ephemeral=True
+        )
+    else:
+        await interaction.response.send_message(
+            f"ℹ️ No override exists for {d.strftime('%d/%m/%Y')}",
+            ephemeral=True
+        )
+
 # ================= REMINDER LOOP =================
 
 async def reminder_loop():
@@ -120,8 +173,6 @@ async def reminder_loop():
         weekday = now.strftime("%A")
 
         send_hour = 0 if weekday in SEND_AT_MIDNIGHT else 5 if weekday in SEND_AT_5AM else None
-
-        # Avoid duplicates even after restart
         last_sent = LAST_SENT.get("date")
 
         if send_hour is not None and now.hour == send_hour and last_sent != today.isoformat():
@@ -131,7 +182,6 @@ async def reminder_loop():
             LAST_SENT["date"] = today.isoformat()
             save_json(LAST_SENT_FILE, LAST_SENT)
 
-        # Sleep until next minute (very low CPU)
         await asyncio.sleep(60)
 
 # ================= STARTUP =================
