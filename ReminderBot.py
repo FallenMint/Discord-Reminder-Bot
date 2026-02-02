@@ -4,10 +4,13 @@ from datetime import datetime, date, timedelta
 import pytz
 import json
 import os
+import asyncio
 
 # ================= CONFIG =================
 
-BOT_TOKEN = os.getenv("BOT_TOKEN")  # Must match systemd Environment variable
+BOT_TOKEN = os.getenv("BOT_TOKEN")  # Must match systemd Environment
+CHANNEL_ID = 1383751887051821147  # CHANGE THIS
+
 CYCLE_START_DATE = date(2025, 12, 22)
 CYCLE_LENGTH = 14
 
@@ -25,27 +28,27 @@ SEND_AT_MIDNIGHT = ["Tuesday", "Wednesday", "Saturday", "Sunday"]
 SEND_AT_5AM = ["Monday", "Thursday", "Friday"]
 
 OVERRIDE_FILE = "overrides.json"
-LAST_SENT_FILE = "last_sent.txt"
+LAST_SENT_FILE = "last_sent.json"
 
 uk = pytz.timezone("Europe/London")
 
-# ================= JSON STORAGE =================
+# ================= STORAGE =================
 
-def load_overrides():
+def load_json(file, default):
     try:
-        with open(OVERRIDE_FILE, "r") as f:
-            raw = json.load(f)
-            return {date.fromisoformat(k): v for k, v in raw.items()}
+        with open(file, "r") as f:
+            return json.load(f)
     except:
-        return {}
+        return default
 
-def save_overrides(data):
-    with open(OVERRIDE_FILE, "w") as f:
-        json.dump({k.isoformat(): v for k, v in data.items()}, f, indent=2)
+def save_json(file, data):
+    with open(file, "w") as f:
+        json.dump(data, f, indent=2)
 
-TEMP_CHANGES = load_overrides()
+TEMP_CHANGES = {date.fromisoformat(k): v for k, v in load_json(OVERRIDE_FILE, {}).items()}
+LAST_SENT = load_json(LAST_SENT_FILE, {})
 
-# ================= ROTATION LOGIC =================
+# ================= ROTATION =================
 
 def get_cycle_day(d):
     return ((d - CYCLE_START_DATE).days % CYCLE_LENGTH) + 1
@@ -58,11 +61,13 @@ def build_message(d):
     code = f"AA{cycle_day:02d}"
     users = get_users_for_date(d)
     mentions = " ".join(f"<@{u}>" for u in users)
-    return f"⏰ **Training Reminder {code}** {mentions}", users
+    return f"⏰ **Training Reminder {code}** {mentions}"
 
 # ================= DISCORD BOT =================
 
 intents = discord.Intents.default()
+intents.members = True
+
 bot = discord.Client(intents=intents)
 tree = app_commands.CommandTree(bot)
 
@@ -86,20 +91,28 @@ async def rota_cmd(interaction: discord.Interaction):
         msg += f"{d.strftime('%A %d %b')}: {mentions}\n"
     await interaction.response.send_message(msg, ephemeral=True)
 
-@tree.command(name="change", description="Change rota for one day")
-async def change_cmd(interaction: discord.Interaction, date_str: str, user_id: int):
-    d = date.fromisoformat(date_str)
-    TEMP_CHANGES[d] = [user_id]
-    save_overrides(TEMP_CHANGES)
-    await interaction.response.send_message(f"Override set for {d}: <@{user_id}>", ephemeral=True)
+@tree.command(name="change", description="Override rota for one day")
+@app_commands.describe(date="Pick date", user="Pick user")
+async def change_cmd(interaction: discord.Interaction, date: str, user: discord.User):
+    try:
+        d = datetime.fromisoformat(date).date()
+    except:
+        await interaction.response.send_message("❌ Invalid date.", ephemeral=True)
+        return
 
-# ================= AUTO REMINDER LOOP =================
+    TEMP_CHANGES[d] = [user.id]
+    save_json(OVERRIDE_FILE, {k.isoformat(): v for k, v in TEMP_CHANGES.items()})
+
+    await interaction.response.send_message(
+        f"✅ Override set for {d.strftime('%d/%m/%Y')}: {user.mention}",
+        ephemeral=True
+    )
+
+# ================= REMINDER LOOP =================
 
 async def reminder_loop():
     await bot.wait_until_ready()
-    channel = bot.get_channel(1383751887051821147)  # CHANGE THIS
-
-    last_sent = None
+    channel = bot.get_channel(CHANNEL_ID)
 
     while not bot.is_closed():
         now = datetime.now(uk)
@@ -108,19 +121,25 @@ async def reminder_loop():
 
         send_hour = 0 if weekday in SEND_AT_MIDNIGHT else 5 if weekday in SEND_AT_5AM else None
 
-        if send_hour is not None and now.hour == send_hour and last_sent != today:
-            msg, _ = build_message(today)
-            await channel.send(msg)
-            last_sent = today
+        # Avoid duplicates even after restart
+        last_sent = LAST_SENT.get("date")
 
-        await discord.utils.sleep_until((now + timedelta(minutes=1)).replace(second=0, microsecond=0))
+        if send_hour is not None and now.hour == send_hour and last_sent != today.isoformat():
+            msg = build_message(today)
+            await channel.send(msg)
+
+            LAST_SENT["date"] = today.isoformat()
+            save_json(LAST_SENT_FILE, LAST_SENT)
+
+        # Sleep until next minute (very low CPU)
+        await asyncio.sleep(60)
 
 # ================= STARTUP =================
 
 @bot.event
 async def on_ready():
     await tree.sync()
-    print(f"Logged in as {bot.user}")
+    print(f"✅ Logged in as {bot.user}")
     bot.loop.create_task(reminder_loop())
 
 bot.run(BOT_TOKEN)
