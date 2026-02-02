@@ -7,8 +7,7 @@ import os
 
 # ================= CONFIG =================
 
-BOT_TOKEN = os.getenv("BOT_TOKEN")
-  # export this in Linux
+BOT_TOKEN = os.getenv("BOT_TOKEN")  # Must match systemd Environment variable
 CYCLE_START_DATE = date(2025, 12, 22)
 CYCLE_LENGTH = 14
 
@@ -73,7 +72,8 @@ tree = app_commands.CommandTree(bot)
 async def next_cmd(interaction: discord.Interaction):
     today = datetime.now(uk).date()
     users = get_users_for_date(today)
-    await interaction.response.send_message(f"Next: {users}", ephemeral=True)
+    mentions = " ".join(f"<@{u}>" for u in users)
+    await interaction.response.send_message(f"Next: {mentions}", ephemeral=True)
 
 @tree.command(name="rota", description="Show the next 7 days rota")
 async def rota_cmd(interaction: discord.Interaction):
@@ -82,7 +82,8 @@ async def rota_cmd(interaction: discord.Interaction):
     for i in range(7):
         d = today + timedelta(days=i)
         users = get_users_for_date(d)
-        msg += f"{d.strftime('%A %d %b')}: {users}\n"
+        mentions = " ".join(f"<@{u}>" for u in users)
+        msg += f"{d.strftime('%A %d %b')}: {mentions}\n"
     await interaction.response.send_message(msg, ephemeral=True)
 
 @tree.command(name="change", description="Change rota for one day")
@@ -90,7 +91,7 @@ async def change_cmd(interaction: discord.Interaction, date_str: str, user_id: i
     d = date.fromisoformat(date_str)
     TEMP_CHANGES[d] = [user_id]
     save_overrides(TEMP_CHANGES)
-    await interaction.response.send_message(f"Override set for {d}: {user_id}", ephemeral=True)
+    await interaction.response.send_message(f"Override set for {d}: <@{user_id}>", ephemeral=True)
 
 # ================= AUTO REMINDER LOOP =================
 
@@ -123,5 +124,3 @@ async def on_ready():
     bot.loop.create_task(reminder_loop())
 
 bot.run(BOT_TOKEN)
-
-
