@@ -8,13 +8,12 @@ import asyncio
 
 # ================= CONFIG =================
 
-BOT_TOKEN = os.getenv("BOT_TOKEN")  # Must match systemd Environment
+BOT_TOKEN = os.getenv("BOT_TOKEN")
 CHANNEL_ID = 1383751887051821147  # CHANGE THIS
 
-# ROLE IDS THAT CAN CHANGE/CLEAR ROTA
 ALLOWED_ROLES = [
-    1381269885769875506,  # Support Role ID
-    1382475365557076029,  # Owners & Founders Role ID
+    1381269885769875506,
+    1382475365557076029,
 ]
 
 CYCLE_START_DATE = date(2025, 12, 22)
@@ -104,7 +103,7 @@ async def rota_cmd(interaction: discord.Interaction):
     await interaction.response.send_message(msg, ephemeral=True)
 
 
-# ===== CHANGE (ADMIN ONLY, DATE PICKER + USER PICKER) =====
+# ================= CHANGE COMMAND =================
 
 @tree.command(name="change", description="Override rota for one day")
 @app_commands.describe(date="Pick date", user="Pick user")
@@ -129,7 +128,25 @@ async def change_cmd(interaction: discord.Interaction, date: str, user: discord.
     )
 
 
-# ===== CLEAR (ADMIN ONLY, UK DATE FORMAT) =====
+# ===== DATE AUTOCOMPLETE DROPDOWN =====
+
+@change_cmd.autocomplete("date")
+async def date_autocomplete(interaction: discord.Interaction, current: str):
+    today = datetime.now(uk).date()
+    choices = []
+
+    for i in range(30):  # next 30 days
+        d = today + timedelta(days=i)
+        display = d.strftime("%d/%m/%Y")
+        iso = d.isoformat()
+
+        if current.lower() in display.lower():
+            choices.append(app_commands.Choice(name=display, value=iso))
+
+    return choices[:25]  # Discord limit
+
+
+# ================= CLEAR COMMAND =================
 
 @tree.command(name="clear", description="Clear rota override (DD/MM/YYYY)")
 @app_commands.describe(date="Date in DD/MM/YYYY")
@@ -161,6 +178,7 @@ async def clear_cmd(interaction: discord.Interaction, date: str):
             ephemeral=True
         )
 
+
 # ================= REMINDER LOOP =================
 
 async def reminder_loop():
@@ -183,6 +201,7 @@ async def reminder_loop():
             save_json(LAST_SENT_FILE, LAST_SENT)
 
         await asyncio.sleep(60)
+
 
 # ================= STARTUP =================
 
