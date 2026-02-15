@@ -5,6 +5,7 @@ import pytz
 import json
 import os
 import asyncio
+from collections import Counter
 
 # ================= CONFIG =================
 
@@ -66,6 +67,10 @@ def get_cycle_day(d):
 def get_users_for_date(d):
     return TEMP_CHANGES.get(d, MENTION_SCHEDULE.get(d.strftime("%A"), []))
 
+def is_valid_rota_day(d):
+    weekday = d.strftime("%A")
+    return weekday in SEND_AT_MIDNIGHT or weekday in SEND_AT_5AM or d in TEMP_CHANGES
+
 def build_message(d):
     cycle_day = get_cycle_day(d)
     code = f"AA{cycle_day:02d}"
@@ -81,82 +86,76 @@ intents.members = True
 bot = discord.Client(intents=intents)
 tree = app_commands.CommandTree(bot)
 
-# ================= FIXED NEXT COMMAND =================
+# ================= NEXT =================
 
-@tree.command(name="next", description="Show who is next in the rota")
+@tree.command(name="next", description="Show next rota day")
 async def next_cmd(interaction: discord.Interaction):
     today = datetime.now(uk).date()
 
-    # Look ahead up to 14 days
-    for i in range(1, 15):
+    for i in range(1, 30):
         d = today + timedelta(days=i)
-        weekday = d.strftime("%A")
-
-        send_hour = (
-            0 if weekday in SEND_AT_MIDNIGHT
-            else 5 if weekday in SEND_AT_5AM
-            else None
-        )
-
-        if send_hour is not None or d in TEMP_CHANGES:
+        if is_valid_rota_day(d):
             users = get_users_for_date(d)
             mentions = " ".join(f"<@{u}>" for u in users)
-            cycle_day = get_cycle_day(d)
-            code = f"AA{cycle_day:02d}"
+            code = f"AA{get_cycle_day(d):02d}"
 
             await interaction.response.send_message(
-                f"Next rota: **{d.strftime('%A %d %b')} ({code})** → {mentions}",
+                f"**{d.strftime('%A %d %b')} ({code})** → {mentions}",
                 ephemeral=True
             )
             return
 
     await interaction.response.send_message("No upcoming rota found.", ephemeral=True)
 
-# ================= ROTA COMMAND =================
+# ================= NEXT 3 =================
 
-@tree.command(name="rota", description="Show the next 7 days rota")
-async def rota_cmd(interaction: discord.Interaction):
+@tree.command(name="next3", description="Show next 3 rota days")
+async def next3_cmd(interaction: discord.Interaction):
     today = datetime.now(uk).date()
-    msg = ""
-    for i in range(7):
+    results = []
+
+    for i in range(1, 60):
         d = today + timedelta(days=i)
-        users = get_users_for_date(d)
-        mentions = " ".join(f"<@{u}>" for u in users)
-        msg += f"{d.strftime('%A %d %b')}: {mentions}\n"
-    await interaction.response.send_message(msg, ephemeral=True)
+        if is_valid_rota_day(d):
+            users = get_users_for_date(d)
+            mentions = " ".join(f"<@{u}>" for u in users)
+            code = f"AA{get_cycle_day(d):02d}"
+            results.append(f"**{d.strftime('%A %d %b')} ({code})** → {mentions}")
 
-# ================= CHANGE COMMAND =================
+        if len(results) == 3:
+            break
 
-@tree.command(name="change", description="Override rota for one day")
-@app_commands.describe(date="Pick date", user="Pick user")
-async def change_cmd(interaction: discord.Interaction, date: str, user: discord.User):
+    if results:
+        await interaction.response.send_message("\n".join(results), ephemeral=True)
+    else:
+        await interaction.response.send_message("No upcoming rota found.", ephemeral=True)
 
-    if not isinstance(interaction.user, discord.Member) or not has_permission(interaction.user):
-        await interaction.response.send_message("❌ No permission.", ephemeral=True)
-        return
+# ================= FIND =================
 
+@tree.command(name="find", description="Find who is scheduled on a date")
+@app_commands.describe(date="Pick date")
+async def find_cmd(interaction: discord.Interaction, date: str):
     try:
         d = datetime.fromisoformat(date).date()
     except:
         await interaction.response.send_message("❌ Invalid date.", ephemeral=True)
         return
 
-    TEMP_CHANGES[d] = [user.id]
-    save_json(OVERRIDE_FILE, {k.isoformat(): v for k, v in TEMP_CHANGES.items()})
+    users = get_users_for_date(d)
+    mentions = " ".join(f"<@{u}>" for u in users) if users else "No one scheduled"
+    code = f"AA{get_cycle_day(d):02d}"
 
     await interaction.response.send_message(
-        f"✅ Override set for {d.strftime('%d/%m/%Y')}: {user.mention}",
+        f"**{d.strftime('%A %d %b %Y')} ({code})** → {mentions}",
         ephemeral=True
     )
 
-# ================= DATE AUTOCOMPLETE =================
-
-@change_cmd.autocomplete("date")
-async def date_autocomplete(interaction: discord.Interaction, current: str):
+@find_cmd.autocomplete("date")
+async def find_date_autocomplete(interaction: discord.Interaction, current: str):
     today = datetime.now(uk).date()
     choices = []
 
-    for i in range(30):
+    for i in range(60):
         d = today + timedelta(days=i)
         display = d.strftime("%d/%m/%Y")
         iso = d.isoformat()
@@ -166,37 +165,31 @@ async def date_autocomplete(interaction: discord.Interaction, current: str):
 
     return choices[:25]
 
-# ================= CLEAR COMMAND =================
+# ================= STATS =================
 
-@tree.command(name="clear", description="Clear rota override (DD/MM/YYYY)")
-@app_commands.describe(date="Date in DD/MM/YYYY")
-async def clear_cmd(interaction: discord.Interaction, date: str):
+@tree.command(name="stats", description="Show rota stats for next 30 days")
+async def stats_cmd(interaction: discord.Interaction):
+    today = datetime.now(uk).date()
+    counter = Counter()
 
-    if not isinstance(interaction.user, discord.Member) or not has_permission(interaction.user):
-        await interaction.response.send_message("❌ No permission.", ephemeral=True)
+    for i in range(30):
+        d = today + timedelta(days=i)
+        if is_valid_rota_day(d):
+            users = get_users_for_date(d)
+            for u in users:
+                counter[u] += 1
+
+    if not counter:
+        await interaction.response.send_message("No rota data found.", ephemeral=True)
         return
 
-    try:
-        d = datetime.strptime(date, "%d/%m/%Y").date()
-    except:
-        await interaction.response.send_message(
-            "❌ Invalid date. Use DD/MM/YYYY",
-            ephemeral=True
-        )
-        return
+    sorted_counts = sorted(counter.items(), key=lambda x: x[1], reverse=True)
+    msg = "**Rota Stats (Next 30 Days)**\n\n"
 
-    if d in TEMP_CHANGES:
-        del TEMP_CHANGES[d]
-        save_json(OVERRIDE_FILE, {k.isoformat(): v for k, v in TEMP_CHANGES.items()})
-        await interaction.response.send_message(
-            f"✅ Override cleared for {d.strftime('%d/%m/%Y')}",
-            ephemeral=True
-        )
-    else:
-        await interaction.response.send_message(
-            f"ℹ️ No override exists for {d.strftime('%d/%m/%Y')}",
-            ephemeral=True
-        )
+    for user_id, count in sorted_counts:
+        msg += f"<@{user_id}> → {count} shifts\n"
+
+    await interaction.response.send_message(msg, ephemeral=True)
 
 # ================= REMINDER LOOP =================
 
