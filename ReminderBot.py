@@ -11,6 +11,7 @@ from collections import Counter
 
 BOT_TOKEN = os.getenv("BOT_TOKEN")
 CHANNEL_ID = 1383751887051821147
+GUILD_ID = 1381262070409855077  # ← PUT YOUR SERVER ID HERE
 
 ALLOWED_ROLES = [
     1381269885769875506,
@@ -54,11 +55,6 @@ def save_json(file, data):
 TEMP_CHANGES = {date.fromisoformat(k): v for k, v in load_json(OVERRIDE_FILE, {}).items()}
 LAST_SENT = load_json(LAST_SENT_FILE, {})
 
-# ================= PERMISSION CHECK =================
-
-def has_permission(member: discord.Member):
-    return any(role.id in ALLOWED_ROLES for role in member.roles)
-
 # ================= ROTATION LOGIC =================
 
 def get_cycle_day(d):
@@ -72,8 +68,7 @@ def is_valid_rota_day(d):
     return weekday in SEND_AT_MIDNIGHT or weekday in SEND_AT_5AM or d in TEMP_CHANGES
 
 def build_message(d):
-    cycle_day = get_cycle_day(d)
-    code = f"AA{cycle_day:02d}"
+    code = f"AA{get_cycle_day(d):02d}"
     users = get_users_for_date(d)
     mentions = " ".join(f"<@{u}>" for u in users)
     return f"⏰ **Training Reminder {code}** {mentions}"
@@ -82,55 +77,39 @@ def build_message(d):
 
 intents = discord.Intents.default()
 intents.members = True
-
 bot = discord.Client(intents=intents)
 tree = app_commands.CommandTree(bot)
 
-# ================= NEXT =================
+# ================= COMMANDS =================
 
 @tree.command(name="next", description="Show next rota day")
 async def next_cmd(interaction: discord.Interaction):
     today = datetime.now(uk).date()
-
     for i in range(1, 30):
         d = today + timedelta(days=i)
         if is_valid_rota_day(d):
-            users = get_users_for_date(d)
-            mentions = " ".join(f"<@{u}>" for u in users)
+            mentions = " ".join(f"<@{u}>" for u in get_users_for_date(d))
             code = f"AA{get_cycle_day(d):02d}"
-
             await interaction.response.send_message(
                 f"**{d.strftime('%A %d %b')} ({code})** → {mentions}",
                 ephemeral=True
             )
             return
-
     await interaction.response.send_message("No upcoming rota found.", ephemeral=True)
-
-# ================= NEXT 3 =================
 
 @tree.command(name="next3", description="Show next 3 rota days")
 async def next3_cmd(interaction: discord.Interaction):
     today = datetime.now(uk).date()
     results = []
-
     for i in range(1, 60):
         d = today + timedelta(days=i)
         if is_valid_rota_day(d):
-            users = get_users_for_date(d)
-            mentions = " ".join(f"<@{u}>" for u in users)
+            mentions = " ".join(f"<@{u}>" for u in get_users_for_date(d))
             code = f"AA{get_cycle_day(d):02d}"
             results.append(f"**{d.strftime('%A %d %b')} ({code})** → {mentions}")
-
         if len(results) == 3:
             break
-
-    if results:
-        await interaction.response.send_message("\n".join(results), ephemeral=True)
-    else:
-        await interaction.response.send_message("No upcoming rota found.", ephemeral=True)
-
-# ================= FIND =================
+    await interaction.response.send_message("\n".join(results) if results else "No upcoming rota found.", ephemeral=True)
 
 @tree.command(name="find", description="Find who is scheduled on a date")
 @app_commands.describe(date="Pick date")
@@ -153,19 +132,12 @@ async def find_cmd(interaction: discord.Interaction, date: str):
 @find_cmd.autocomplete("date")
 async def find_date_autocomplete(interaction: discord.Interaction, current: str):
     today = datetime.now(uk).date()
-    choices = []
-
-    for i in range(60):
-        d = today + timedelta(days=i)
-        display = d.strftime("%d/%m/%Y")
-        iso = d.isoformat()
-
-        if current.lower() in display.lower():
-            choices.append(app_commands.Choice(name=display, value=iso))
-
-    return choices[:25]
-
-# ================= STATS =================
+    return [
+        app_commands.Choice(name=(today + timedelta(days=i)).strftime("%d/%m/%Y"),
+                            value=(today + timedelta(days=i)).isoformat())
+        for i in range(60)
+        if current in (today + timedelta(days=i)).strftime("%d/%m/%Y")
+    ][:25]
 
 @tree.command(name="stats", description="Show rota stats for next 30 days")
 async def stats_cmd(interaction: discord.Interaction):
@@ -175,18 +147,15 @@ async def stats_cmd(interaction: discord.Interaction):
     for i in range(30):
         d = today + timedelta(days=i)
         if is_valid_rota_day(d):
-            users = get_users_for_date(d)
-            for u in users:
+            for u in get_users_for_date(d):
                 counter[u] += 1
 
     if not counter:
         await interaction.response.send_message("No rota data found.", ephemeral=True)
         return
 
-    sorted_counts = sorted(counter.items(), key=lambda x: x[1], reverse=True)
     msg = "**Rota Stats (Next 30 Days)**\n\n"
-
-    for user_id, count in sorted_counts:
+    for user_id, count in sorted(counter.items(), key=lambda x: x[1], reverse=True):
         msg += f"<@{user_id}> → {count} shifts\n"
 
     await interaction.response.send_message(msg, ephemeral=True)
@@ -206,20 +175,30 @@ async def reminder_loop():
         last_sent = LAST_SENT.get("date")
 
         if send_hour is not None and now.hour == send_hour and last_sent != today.isoformat():
-            msg = build_message(today)
-            await channel.send(msg)
-
+            await channel.send(build_message(today))
             LAST_SENT["date"] = today.isoformat()
             save_json(LAST_SENT_FILE, LAST_SENT)
 
         await asyncio.sleep(60)
 
-# ================= STARTUP =================
+# ================= SAFE STARTUP =================
 
 @bot.event
 async def on_ready():
-    await tree.sync()
-    print(f"✅ Logged in as {bot.user}")
+    print(f"🔄 Logging in as {bot.user}")
+    guild = discord.Object(id=GUILD_ID)
+
+    try:
+        guild_cmds = await tree.sync(guild=guild)
+        print(f"✅ Synced {len(guild_cmds)} guild commands")
+
+        global_cmds = await tree.sync()
+        print(f"🌍 Synced {len(global_cmds)} global commands")
+
+    except Exception as e:
+        print(f"❌ Command sync failed: {e}")
+
+    print("✅ Bot ready")
     bot.loop.create_task(reminder_loop())
 
 bot.run(BOT_TOKEN)
