@@ -9,7 +9,7 @@ import asyncio
 # ================= CONFIG =================
 
 BOT_TOKEN = os.getenv("BOT_TOKEN")
-CHANNEL_ID = 1383751887051821147  # CHANGE THIS
+CHANNEL_ID = 1383751887051821147
 
 ALLOWED_ROLES = [
     1381269885769875506,
@@ -81,15 +81,38 @@ intents.members = True
 bot = discord.Client(intents=intents)
 tree = app_commands.CommandTree(bot)
 
-# ================= SLASH COMMANDS =================
+# ================= FIXED NEXT COMMAND =================
 
 @tree.command(name="next", description="Show who is next in the rota")
 async def next_cmd(interaction: discord.Interaction):
     today = datetime.now(uk).date()
-    users = get_users_for_date(today)
-    mentions = " ".join(f"<@{u}>" for u in users)
-    await interaction.response.send_message(f"Next: {mentions}", ephemeral=True)
 
+    # Look ahead up to 14 days
+    for i in range(1, 15):
+        d = today + timedelta(days=i)
+        weekday = d.strftime("%A")
+
+        send_hour = (
+            0 if weekday in SEND_AT_MIDNIGHT
+            else 5 if weekday in SEND_AT_5AM
+            else None
+        )
+
+        if send_hour is not None or d in TEMP_CHANGES:
+            users = get_users_for_date(d)
+            mentions = " ".join(f"<@{u}>" for u in users)
+            cycle_day = get_cycle_day(d)
+            code = f"AA{cycle_day:02d}"
+
+            await interaction.response.send_message(
+                f"Next rota: **{d.strftime('%A %d %b')} ({code})** → {mentions}",
+                ephemeral=True
+            )
+            return
+
+    await interaction.response.send_message("No upcoming rota found.", ephemeral=True)
+
+# ================= ROTA COMMAND =================
 
 @tree.command(name="rota", description="Show the next 7 days rota")
 async def rota_cmd(interaction: discord.Interaction):
@@ -101,7 +124,6 @@ async def rota_cmd(interaction: discord.Interaction):
         mentions = " ".join(f"<@{u}>" for u in users)
         msg += f"{d.strftime('%A %d %b')}: {mentions}\n"
     await interaction.response.send_message(msg, ephemeral=True)
-
 
 # ================= CHANGE COMMAND =================
 
@@ -127,15 +149,14 @@ async def change_cmd(interaction: discord.Interaction, date: str, user: discord.
         ephemeral=True
     )
 
-
-# ===== DATE AUTOCOMPLETE DROPDOWN =====
+# ================= DATE AUTOCOMPLETE =================
 
 @change_cmd.autocomplete("date")
 async def date_autocomplete(interaction: discord.Interaction, current: str):
     today = datetime.now(uk).date()
     choices = []
 
-    for i in range(30):  # next 30 days
+    for i in range(30):
         d = today + timedelta(days=i)
         display = d.strftime("%d/%m/%Y")
         iso = d.isoformat()
@@ -143,8 +164,7 @@ async def date_autocomplete(interaction: discord.Interaction, current: str):
         if current.lower() in display.lower():
             choices.append(app_commands.Choice(name=display, value=iso))
 
-    return choices[:25]  # Discord limit
-
+    return choices[:25]
 
 # ================= CLEAR COMMAND =================
 
@@ -160,7 +180,7 @@ async def clear_cmd(interaction: discord.Interaction, date: str):
         d = datetime.strptime(date, "%d/%m/%Y").date()
     except:
         await interaction.response.send_message(
-            "❌ Invalid date. Use DD/MM/YYYY (example: 05/02/2026)",
+            "❌ Invalid date. Use DD/MM/YYYY",
             ephemeral=True
         )
         return
@@ -177,7 +197,6 @@ async def clear_cmd(interaction: discord.Interaction, date: str):
             f"ℹ️ No override exists for {d.strftime('%d/%m/%Y')}",
             ephemeral=True
         )
-
 
 # ================= REMINDER LOOP =================
 
@@ -201,7 +220,6 @@ async def reminder_loop():
             save_json(LAST_SENT_FILE, LAST_SENT)
 
         await asyncio.sleep(60)
-
 
 # ================= STARTUP =================
 
