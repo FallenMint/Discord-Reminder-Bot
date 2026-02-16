@@ -14,6 +14,7 @@ CHANNEL_ID = 1383751887051821147
 ALLOWED_ROLES = [
     1381269885769875506,
     1382475365557076029,
+    1472998312708669453,
 ]
 
 CYCLE_START_DATE = date(2025, 12, 22)
@@ -230,3 +231,4 @@ async def on_ready():
     bot.loop.create_task(reminder_loop())
 
 bot.run(BOT_TOKEN)
+
