@@ -33,6 +33,9 @@ MENTION_SCHEDULE = {
 SEND_AT_MIDNIGHT = ["Tuesday", "Wednesday", "Saturday", "Sunday"]
 SEND_AT_5AM = ["Monday", "Thursday", "Friday"]
 
+# ✅ Emirates must always be 5AM
+EMIRATES_ID = 1262105376095207526
+
 OVERRIDE_FILE = "overrides.json"
 LAST_SENT_FILE = "last_sent.json"
 
@@ -67,6 +70,22 @@ def get_cycle_day(d):
 def get_users_for_date(d):
     return TEMP_CHANGES.get(d, MENTION_SCHEDULE.get(d.strftime("%A"), []))
 
+# ✅ Decide send hour with Emirates rule
+def get_send_hour(d):
+    weekday = d.strftime("%A")
+    users = get_users_for_date(d)
+
+    # Emirates override → always 5AM
+    if EMIRATES_ID in users:
+        return 5
+
+    if weekday in SEND_AT_MIDNIGHT:
+        return 0
+    if weekday in SEND_AT_5AM:
+        return 5
+
+    return None
+
 def build_message(d):
     cycle_day = get_cycle_day(d)
     code = f"AA{cycle_day:02d}"
@@ -82,22 +101,15 @@ intents.members = True
 bot = discord.Client(intents=intents)
 tree = app_commands.CommandTree(bot)
 
-# ================= FIXED NEXT COMMAND =================
+# ================= NEXT COMMAND =================
 
 @tree.command(name="next", description="Show who is next in the rota")
 async def next_cmd(interaction: discord.Interaction):
     today = datetime.now(uk).date()
 
-    # Look ahead up to 14 days
     for i in range(1, 15):
         d = today + timedelta(days=i)
-        weekday = d.strftime("%A")
-
-        send_hour = (
-            0 if weekday in SEND_AT_MIDNIGHT
-            else 5 if weekday in SEND_AT_5AM
-            else None
-        )
+        send_hour = get_send_hour(d)
 
         if send_hour is not None or d in TEMP_CHANGES:
             users = get_users_for_date(d)
@@ -130,7 +142,7 @@ async def rota_cmd(interaction: discord.Interaction):
 
 @tree.command(name="change", description="Override rota for one day")
 @app_commands.describe(date="Pick date", user="Pick user")
-async def change_cmd(interaction: discord.Interaction, date: str, user: discord.User):
+async def change_cmd(interaction: discord.Interation, date: str, user: discord.User):
 
     if not isinstance(interaction.user, discord.Member) or not has_permission(interaction.user):
         await interaction.response.send_message("❌ No permission.", ephemeral=True)
@@ -208,9 +220,8 @@ async def reminder_loop():
     while not bot.is_closed():
         now = datetime.now(uk)
         today = now.date()
-        weekday = now.strftime("%A")
 
-        send_hour = 0 if weekday in SEND_AT_MIDNIGHT else 5 if weekday in SEND_AT_5AM else None
+        send_hour = get_send_hour(today)
         last_sent = LAST_SENT.get("date")
 
         if send_hour is not None and now.hour == send_hour and last_sent != today.isoformat():
@@ -231,4 +242,3 @@ async def on_ready():
     bot.loop.create_task(reminder_loop())
 
 bot.run(BOT_TOKEN)
-
