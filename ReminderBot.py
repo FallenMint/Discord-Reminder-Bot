@@ -1,5 +1,6 @@
 import discord
 from discord import app_commands
+from discord.ext import commands
 from datetime import datetime, date, timedelta
 import pytz
 import json
@@ -12,7 +13,7 @@ print("✅ NEW VERSION RUNNING")
 
 BOT_TOKEN = os.getenv("BOT_TOKEN")
 CHANNEL_ID = 1383751887051821147
-GUILD_ID = 1381262070409855077  # Your actual server ID
+GUILD_ID = 1381262070409855077
 
 ALLOWED_ROLES = [
     1381269885769875506,
@@ -33,36 +34,14 @@ MENTION_SCHEDULE = {
     "Sunday":    [1141335656044429322],
 }
 
-SEND_AT_MIDNIGHT = ["Tuesday", "Wednesday", "Saturday", "Sunday"]
-SEND_AT_5AM = ["Monday", "Thursday", "Friday"]
-
-EMIRATES_ID = 1262105376095207526
-
-OVERRIDE_FILE = "overrides.json"
-LAST_SENT_FILE = "last_sent.json"
-
 uk = pytz.timezone("Europe/London")
 
-# ================= STORAGE =================
+# ================= BOT =================
 
-def load_json(file, default):
-    try:
-        with open(file, "r") as f:
-            return json.load(f)
-    except:
-        return default
+intents = discord.Intents.default()
+intents.members = True
 
-def save_json(file, data):
-    with open(file, "w") as f:
-        json.dump(data, f, indent=2)
-
-TEMP_CHANGES = {date.fromisoformat(k): v for k, v in load_json(OVERRIDE_FILE, {}).items()}
-LAST_SENT = load_json(LAST_SENT_FILE, {})
-
-# ================= PERMISSIONS =================
-
-def has_permission(member: discord.Member):
-    return any(role.id in ALLOWED_ROLES for role in member.roles)
+bot = commands.Bot(command_prefix="!", intents=intents)
 
 # ================= ROTATION =================
 
@@ -70,18 +49,7 @@ def get_cycle_day(d):
     return ((d - CYCLE_START_DATE).days % CYCLE_LENGTH) + 1
 
 def get_users_for_date(d):
-    return TEMP_CHANGES.get(d, MENTION_SCHEDULE.get(d.strftime("%A"), []))
-
-def get_send_hour(d):
-    users = get_users_for_date(d)
-    if EMIRATES_ID in users:
-        return 5
-    weekday = d.strftime("%A")
-    if weekday in SEND_AT_MIDNIGHT:
-        return 0
-    if weekday in SEND_AT_5AM:
-        return 5
-    return None
+    return MENTION_SCHEDULE.get(d.strftime("%A"), [])
 
 def build_message(d):
     cycle_day = get_cycle_day(d)
@@ -90,115 +58,45 @@ def build_message(d):
     mentions = " ".join(f"<@{u}>" for u in users)
     return f"⏰ **Training Reminder {code}** {mentions}"
 
-# ================= BOT =================
-
-intents = discord.Intents.default()
-intents.members = True
-
-bot = discord.Client(intents=intents)
-tree = app_commands.CommandTree(bot)
-
 # ================= COMMANDS =================
 
-@tree.command(name="change", description="Override rota (DD/MM/YYYY)")
-@app_commands.describe(date="DD/MM/YYYY", user="Pick user")
-async def change_cmd(interaction: discord.Interaction, date: str, user: discord.User):
-
-    if not isinstance(interaction.user, discord.Member) or not has_permission(interaction.user):
-        await interaction.response.send_message("❌ No permission.", ephemeral=True)
-        return
-
-    try:
-        d = datetime.strptime(date, "%d/%m/%Y").date()
-    except:
-        await interaction.response.send_message("❌ Use DD/MM/YYYY", ephemeral=True)
-        return
-
-    TEMP_CHANGES[d] = [user.id]
-    save_json(OVERRIDE_FILE, {k.isoformat(): v for k, v in TEMP_CHANGES.items()})
-
-    await interaction.response.send_message(
-        f"✅ Override set for {d.strftime('%d/%m/%Y')}: {user.mention}",
-        ephemeral=True
-    )
-
-@tree.command(name="clear", description="Clear override (DD/MM/YYYY)")
-@app_commands.describe(date="DD/MM/YYYY")
-async def clear_cmd(interaction: discord.Interaction, date: str):
-
-    if not isinstance(interaction.user, discord.Member) or not has_permission(interaction.user):
-        await interaction.response.send_message("❌ No permission.", ephemeral=True)
-        return
-
-    try:
-        d = datetime.strptime(date, "%d/%m/%Y").date()
-    except:
-        await interaction.response.send_message("❌ Use DD/MM/YYYY", ephemeral=True)
-        return
-
-    TEMP_CHANGES.pop(d, None)
-    save_json(OVERRIDE_FILE, {k.isoformat(): v for k, v in TEMP_CHANGES.items()})
-
-    await interaction.response.send_message(
-        f"✅ Cleared override for {d.strftime('%d/%m/%Y')}",
-        ephemeral=True
-    )
-
-@tree.command(name="next", description="Show tomorrow's reminder")
+@bot.tree.command(name="next", description="Show tomorrow's reminder")
 async def next_cmd(interaction: discord.Interaction):
     tomorrow = datetime.now(uk).date() + timedelta(days=1)
     await interaction.response.send_message(build_message(tomorrow))
 
-@tree.command(name="rota", description="Show next 7 days rota")
-async def rota_cmd(interaction: discord.Interaction):
+@bot.tree.command(name="rota", description="Show next 7 days rota")
+async def rota_cmd(interaction: discord.Interation):
     today = datetime.now(uk).date()
-    messages = []
+    msgs = []
     for i in range(7):
         d = today + timedelta(days=i)
-        messages.append(f"**{d.strftime('%A %d/%m')}** - {build_message(d)}")
-    await interaction.response.send_message("\n".join(messages))
+        msgs.append(f"{d.strftime('%A %d/%m')} - {build_message(d)}")
+    await interaction.response.send_message("\n".join(msgs))
 
-# ================= LOOP =================
+@bot.tree.command(name="change", description="Test command")
+async def change_cmd(interaction: discord.Interaction):
+    await interaction.response.send_message("Change works!")
 
-async def reminder_loop():
-    await bot.wait_until_ready()
-    channel = bot.get_channel(CHANNEL_ID)
+@bot.tree.command(name="clear", description="Test command")
+async def clear_cmd(interaction: discord.Interaction):
+    await interaction.response.send_message("Clear works!")
 
-    if channel is None:
-        print("❌ Channel not found")
-        return
-
-    while not bot.is_closed():
-        now = datetime.now(uk)
-        today = now.date()
-
-        send_hour = get_send_hour(today)
-        last_sent = LAST_SENT.get("date")
-
-        if send_hour is not None and now.hour == send_hour and last_sent != today.isoformat():
-            await channel.send(build_message(today))
-            LAST_SENT["date"] = today.isoformat()
-            save_json(LAST_SENT_FILE, LAST_SENT)
-
-        await asyncio.sleep(60)
-
-# ================= READY EVENT =================
+# ================= SAFE SYNC =================
 
 @bot.event
-async def on_ready():
+async def setup_hook():
     guild = discord.Object(id=GUILD_ID)
-
-    print("🧹 Clearing old global commands...")
-    tree.clear_commands(guild=None)
-    await tree.sync()
-
-    print("🚀 Syncing guild commands...")
-    synced = await tree.sync(guild=guild)
+    synced = await bot.tree.sync(guild=guild)
 
     print(f"✅ Synced {len(synced)} commands:")
     for cmd in synced:
         print("-", cmd.name)
 
-    bot.loop.create_task(reminder_loop())
+# ================= READY =================
+
+@bot.event
+async def on_ready():
+    print(f"🚀 Logged in as {bot.user}")
 
 bot.run(BOT_TOKEN)
