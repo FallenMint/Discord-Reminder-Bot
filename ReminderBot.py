@@ -3,11 +3,8 @@ from discord.ext import commands
 from datetime import datetime, date, timedelta
 import pytz
 import os
-import asyncio
 
 print("✅ NEW VERSION RUNNING")
-
-# ================= CONFIG =================
 
 BOT_TOKEN = os.getenv("BOT_TOKEN")
 GUILD_ID = 1381262070409855077
@@ -27,10 +24,10 @@ MENTION_SCHEDULE = {
 
 uk = pytz.timezone("Europe/London")
 
-# ================= BOT =================
-
 intents = discord.Intents.default()
 bot = commands.Bot(command_prefix="!", intents=intents)
+
+guild_obj = discord.Object(id=GUILD_ID)
 
 # ================= ROTATION =================
 
@@ -47,12 +44,12 @@ def build_message(d):
 
 # ================= COMMANDS =================
 
-@bot.tree.command(name="next", description="Show tomorrow's reminder")
+@bot.tree.command(name="next", description="Show tomorrow", guild=guild_obj)
 async def next_cmd(interaction: discord.Interaction):
     tomorrow = datetime.now(uk).date() + timedelta(days=1)
     await interaction.response.send_message(build_message(tomorrow))
 
-@bot.tree.command(name="rota", description="Show next 7 days rota")
+@bot.tree.command(name="rota", description="Show next 7 days", guild=guild_obj)
 async def rota_cmd(interaction: discord.Interaction):
     today = datetime.now(uk).date()
     msgs = []
@@ -61,34 +58,28 @@ async def rota_cmd(interaction: discord.Interaction):
         msgs.append(f"{d.strftime('%A %d/%m')} - {build_message(d)}")
     await interaction.response.send_message("\n".join(msgs))
 
-@bot.tree.command(name="change")
-async def change_cmd(interaction: discord.Interaction):
+@bot.tree.command(name="change", guild=guild_obj)
+async def change_cmd(interaction: discord.Interation):
     await interaction.response.send_message("Change works!")
 
-@bot.tree.command(name="clear")
+@bot.tree.command(name="clear", guild=guild_obj)
 async def clear_cmd(interaction: discord.Interaction):
     await interaction.response.send_message("Clear works!")
 
-# ================= SYNC AFTER READY =================
+# ================= READY =================
 
 @bot.event
 async def on_ready():
     print(f"🚀 Logged in as {bot.user}")
 
-    await asyncio.sleep(5)  # wait for cache
+    print("Guilds bot can see:")
+    for g in bot.guilds:
+        print("-", g.name, g.id)
 
-    guild = bot.get_guild(GUILD_ID)
-
-    if guild is None:
-        print("❌ Bot cannot see guild. Check GUILD_ID or invite.")
-        print("Guilds bot can see:", bot.guilds)
-        return
-
-    synced = await bot.tree.sync(guild=guild)
+    synced = await bot.tree.sync(guild=guild_obj)
 
     print(f"✅ Synced {len(synced)} commands:")
     for cmd in synced:
         print("-", cmd.name)
 
 bot.run(BOT_TOKEN)
-
