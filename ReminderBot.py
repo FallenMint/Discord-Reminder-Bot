@@ -6,11 +6,13 @@ import json
 import os
 import asyncio
 
+print("✅ NEW VERSION RUNNING")
+
 # ================= CONFIG =================
 
 BOT_TOKEN = os.getenv("BOT_TOKEN")
 CHANNEL_ID = 1383751887051821147
-GUILD_ID = 1381262070409855077  # ⚠️ PUT YOUR SERVER ID HERE
+GUILD_ID = 1381262070409855077  # Your actual server ID
 
 ALLOWED_ROLES = [
     1381269885769875506,
@@ -180,11 +182,23 @@ async def reminder_loop():
 
         await asyncio.sleep(60)
 
+# ================= READY EVENT =================
+
 @bot.event
 async def on_ready():
     guild = discord.Object(id=GUILD_ID)
-    await tree.sync(guild=guild)  # Instant sync
-    print(f"✅ Logged in as {bot.user}")
+
+    print("🧹 Clearing old global commands...")
+    tree.clear_commands(guild=None)
+    await tree.sync()
+
+    print("🚀 Syncing guild commands...")
+    synced = await tree.sync(guild=guild)
+
+    print(f"✅ Synced {len(synced)} commands:")
+    for cmd in synced:
+        print("-", cmd.name)
+
     bot.loop.create_task(reminder_loop())
 
 bot.run(BOT_TOKEN)
