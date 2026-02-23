@@ -1,8 +1,8 @@
 from discord.ext import commands
 import discord
 
-TOKEN = "YOUR_TOKEN"
-GUILD = YOUR_SERVER_ID
+TOKEN = os.getenv("BOT_TOKEN")
+GUILD = 1381262070409855077
 
 bot = commands.Bot(command_prefix="!", intents=discord.Intents.default())
 
@@ -16,3 +16,4 @@ async def on_ready():
     print("Synced ping")
 
 bot.run(TOKEN)
+
