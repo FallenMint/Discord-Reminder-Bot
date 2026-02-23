@@ -10,6 +10,7 @@ import asyncio
 
 BOT_TOKEN = os.getenv("BOT_TOKEN")
 CHANNEL_ID = 1383751887051821147
+GUILD_ID = 1381262070409855077  # ⚠️ PUT YOUR SERVER ID HERE
 
 ALLOWED_ROLES = [
     1381269885769875506,
@@ -119,6 +120,42 @@ async def change_cmd(interaction: discord.Interaction, date: str, user: discord.
         ephemeral=True
     )
 
+@tree.command(name="clear", description="Clear override (DD/MM/YYYY)")
+@app_commands.describe(date="DD/MM/YYYY")
+async def clear_cmd(interaction: discord.Interaction, date: str):
+
+    if not isinstance(interaction.user, discord.Member) or not has_permission(interaction.user):
+        await interaction.response.send_message("❌ No permission.", ephemeral=True)
+        return
+
+    try:
+        d = datetime.strptime(date, "%d/%m/%Y").date()
+    except:
+        await interaction.response.send_message("❌ Use DD/MM/YYYY", ephemeral=True)
+        return
+
+    TEMP_CHANGES.pop(d, None)
+    save_json(OVERRIDE_FILE, {k.isoformat(): v for k, v in TEMP_CHANGES.items()})
+
+    await interaction.response.send_message(
+        f"✅ Cleared override for {d.strftime('%d/%m/%Y')}",
+        ephemeral=True
+    )
+
+@tree.command(name="next", description="Show tomorrow's reminder")
+async def next_cmd(interaction: discord.Interaction):
+    tomorrow = datetime.now(uk).date() + timedelta(days=1)
+    await interaction.response.send_message(build_message(tomorrow))
+
+@tree.command(name="rota", description="Show next 7 days rota")
+async def rota_cmd(interaction: discord.Interaction):
+    today = datetime.now(uk).date()
+    messages = []
+    for i in range(7):
+        d = today + timedelta(days=i)
+        messages.append(f"**{d.strftime('%A %d/%m')}** - {build_message(d)}")
+    await interaction.response.send_message("\n".join(messages))
+
 # ================= LOOP =================
 
 async def reminder_loop():
@@ -145,7 +182,8 @@ async def reminder_loop():
 
 @bot.event
 async def on_ready():
-    await tree.sync()
+    guild = discord.Object(id=GUILD_ID)
+    await tree.sync(guild=guild)  # Instant sync
     print(f"✅ Logged in as {bot.user}")
     bot.loop.create_task(reminder_loop())
 
