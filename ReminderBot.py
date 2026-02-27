@@ -59,7 +59,7 @@ async def rota_cmd(interaction: discord.Interaction):
     await interaction.response.send_message("\n".join(msgs))
 
 @bot.tree.command(name="change", guild=guild_obj)
-async def change_cmd(interaction: discord.Interation):
+async def change_cmd(interaction: discord.Interaction):
     await interaction.response.send_message("Change works!")
 
 @bot.tree.command(name="clear", guild=guild_obj)
@@ -83,3 +83,4 @@ async def on_ready():
         print("-", cmd.name)
 
 bot.run(BOT_TOKEN)
+
