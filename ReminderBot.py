@@ -12,6 +12,7 @@ GUILD_ID = 1381262070409855077
 CYCLE_START_DATE = date(2025, 12, 22)
 CYCLE_LENGTH = 14
 
+# Instead of pinging users, this can be IDs or names just for display
 MENTION_SCHEDULE = {
     "Monday":    [1262105376095207526],
     "Tuesday":   [285344747743346688],
@@ -39,7 +40,8 @@ def get_users_for_date(d):
 
 def build_message(d):
     code = f"AA{get_cycle_day(d):02d}"
-    mentions = " ".join(f"<@{u}>" for u in get_users_for_date(d))
+    # Display IDs as plain text instead of pinging
+    mentions = ", ".join(str(u) for u in get_users_for_date(d)) or "No one scheduled"
     return f"⏰ **Training Reminder {code}** {mentions}"
 
 # ================= COMMANDS =================
@@ -83,4 +85,3 @@ async def on_ready():
         print("-", cmd.name)
 
 bot.run(BOT_TOKEN)
-
