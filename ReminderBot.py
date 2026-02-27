@@ -12,7 +12,7 @@ GUILD_ID = 1381262070409855077
 CYCLE_START_DATE = date(2025, 12, 22)
 CYCLE_LENGTH = 14
 
-# Instead of pinging users, this can be IDs or names just for display
+# User IDs for schedule
 MENTION_SCHEDULE = {
     "Monday":    [1262105376095207526],
     "Tuesday":   [285344747743346688],
@@ -26,6 +26,8 @@ MENTION_SCHEDULE = {
 uk = pytz.timezone("Europe/London")
 
 intents = discord.Intents.default()
+intents.guilds = True
+intents.members = True  # Needed to fetch member names
 bot = commands.Bot(command_prefix="!", intents=intents)
 
 guild_obj = discord.Object(id=GUILD_ID)
@@ -38,10 +40,23 @@ def get_cycle_day(d):
 def get_users_for_date(d):
     return MENTION_SCHEDULE.get(d.strftime("%A"), [])
 
-def build_message(d):
+async def get_usernames_for_date(d):
+    guild = bot.get_guild(GUILD_ID)
+    if guild is None:
+        return ["Guild not found"]
+    usernames = []
+    for uid in get_users_for_date(d):
+        member = guild.get_member(uid)
+        if member:
+            usernames.append(member.display_name)
+        else:
+            usernames.append(f"User {uid}")  # fallback if user not found
+    return usernames or ["No one scheduled"]
+
+async def build_message(d):
     code = f"AA{get_cycle_day(d):02d}"
-    # Display IDs as plain text instead of pinging
-    mentions = ", ".join(str(u) for u in get_users_for_date(d)) or "No one scheduled"
+    usernames = await get_usernames_for_date(d)
+    mentions = ", ".join(usernames)
     return f"⏰ **Training Reminder {code}** {mentions}"
 
 # ================= COMMANDS =================
@@ -49,7 +64,7 @@ def build_message(d):
 @bot.tree.command(name="next", description="Show tomorrow", guild=guild_obj)
 async def next_cmd(interaction: discord.Interaction):
     tomorrow = datetime.now(uk).date() + timedelta(days=1)
-    await interaction.response.send_message(build_message(tomorrow))
+    await interaction.response.send_message(await build_message(tomorrow))
 
 @bot.tree.command(name="rota", description="Show next 7 days", guild=guild_obj)
 async def rota_cmd(interaction: discord.Interaction):
@@ -57,7 +72,7 @@ async def rota_cmd(interaction: discord.Interaction):
     msgs = []
     for i in range(7):
         d = today + timedelta(days=i)
-        msgs.append(f"{d.strftime('%A %d/%m')} - {build_message(d)}")
+        msgs.append(f"{d.strftime('%A %d/%m')} - {await build_message(d)}")
     await interaction.response.send_message("\n".join(msgs))
 
 @bot.tree.command(name="change", guild=guild_obj)
