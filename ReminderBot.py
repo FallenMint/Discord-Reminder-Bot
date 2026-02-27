@@ -12,7 +12,6 @@ GUILD_ID = 1381262070409855077
 CYCLE_START_DATE = date(2025, 12, 22)
 CYCLE_LENGTH = 14
 
-# User IDs for schedule
 MENTION_SCHEDULE = {
     "Monday":    [1262105376095207526],
     "Tuesday":   [285344747743346688],
@@ -27,7 +26,7 @@ uk = pytz.timezone("Europe/London")
 
 intents = discord.Intents.default()
 intents.guilds = True
-intents.members = True  # Needed to fetch member names
+intents.members = True
 bot = commands.Bot(command_prefix="!", intents=intents)
 
 guild_obj = discord.Object(id=GUILD_ID)
@@ -40,31 +39,25 @@ def get_cycle_day(d):
 def get_users_for_date(d):
     return MENTION_SCHEDULE.get(d.strftime("%A"), [])
 
-async def get_usernames_for_date(d):
+async def build_message(d):
+    code = f"AA{get_cycle_day(d):02d}"
     guild = bot.get_guild(GUILD_ID)
-    if guild is None:
-        return ["Guild not found"]
-    usernames = []
+    mentions = []
     for uid in get_users_for_date(d):
         member = guild.get_member(uid)
         if member:
-            usernames.append(member.display_name)
+            mentions.append(member.mention)  # this will ping them
         else:
-            usernames.append(f"User {uid}")  # fallback if user not found
-    return usernames or ["No one scheduled"]
-
-async def build_message(d):
-    code = f"AA{get_cycle_day(d):02d}"
-    usernames = await get_usernames_for_date(d)
-    mentions = ", ".join(usernames)
-    return f"⏰ **Training Reminder {code}** {mentions}"
+            mentions.append(f"User {uid}")
+    mentions_text = " ".join(mentions) or "No one scheduled"
+    return f"⏰ **Training Reminder {code}** {mentions_text}"
 
 # ================= COMMANDS =================
 
 @bot.tree.command(name="next", description="Show tomorrow", guild=guild_obj)
 async def next_cmd(interaction: discord.Interaction):
     tomorrow = datetime.now(uk).date() + timedelta(days=1)
-    await interaction.response.send_message(await build_message(tomorrow))
+    await interaction.response.send_message(await build_message(tomorrow), ephemeral=True)
 
 @bot.tree.command(name="rota", description="Show next 7 days", guild=guild_obj)
 async def rota_cmd(interaction: discord.Interaction):
@@ -73,15 +66,15 @@ async def rota_cmd(interaction: discord.Interaction):
     for i in range(7):
         d = today + timedelta(days=i)
         msgs.append(f"{d.strftime('%A %d/%m')} - {await build_message(d)}")
-    await interaction.response.send_message("\n".join(msgs))
+    await interaction.response.send_message("\n".join(msgs), ephemeral=True)
 
 @bot.tree.command(name="change", guild=guild_obj)
 async def change_cmd(interaction: discord.Interaction):
-    await interaction.response.send_message("Change works!")
+    await interaction.response.send_message("Change works!", ephemeral=True)
 
 @bot.tree.command(name="clear", guild=guild_obj)
 async def clear_cmd(interaction: discord.Interaction):
-    await interaction.response.send_message("Clear works!")
+    await interaction.response.send_message("Clear works!", ephemeral=True)
 
 # ================= READY =================
 
@@ -94,7 +87,6 @@ async def on_ready():
         print("-", g.name, g.id)
 
     synced = await bot.tree.sync(guild=guild_obj)
-
     print(f"✅ Synced {len(synced)} commands:")
     for cmd in synced:
         print("-", cmd.name)
