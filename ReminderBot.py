@@ -9,8 +9,8 @@ print("✅ NEW VERSION RUNNING")
 
 BOT_TOKEN = os.getenv("BOT_TOKEN")
 GUILD_ID = 1381262070409855077
-REMINDER_CHANNEL_ID = 1383751887051821147  # <-- PUT YOUR CHANNEL ID HERE
-EMIRATES_USER_ID = 1262105376095207526     # <-- PUT EMIRATTES USER ID HERE
+REMINDER_CHANNEL_ID = 123456789012345678  # <-- PUT YOUR CHANNEL ID HERE
+EMIRATES_USER_ID = 999999999999999999     # <-- PUT EMIRATTES USER ID HERE
 
 CYCLE_START_DATE = date(2025, 12, 22)
 CYCLE_LENGTH = 14
@@ -113,7 +113,7 @@ async def rota_cmd(interaction: discord.Interaction):
     await interaction.response.send_message("\n".join(msgs), ephemeral=True)
 
 @bot.tree.command(name="change", guild=guild_obj)
-async def change_cmd(interaction: discord.Interation):
+async def change_cmd(interaction: discord.Interaction):
     await interaction.response.send_message("Change works!", ephemeral=True)
 
 @bot.tree.command(name="clear", guild=guild_obj)
