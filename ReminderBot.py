@@ -3,11 +3,14 @@ from discord.ext import commands
 from datetime import datetime, date, timedelta
 import pytz
 import os
+import asyncio
 
 print("✅ NEW VERSION RUNNING")
 
 BOT_TOKEN = os.getenv("BOT_TOKEN")
 GUILD_ID = 1381262070409855077
+REMINDER_CHANNEL_ID = 1383751887051821147  # <-- PUT YOUR CHANNEL ID HERE
+EMIRATES_USER_ID = 1262105376095207526     # <-- PUT EMIRATTES USER ID HERE
 
 CYCLE_START_DATE = date(2025, 12, 22)
 CYCLE_LENGTH = 14
@@ -46,11 +49,52 @@ async def build_message(d):
     for uid in get_users_for_date(d):
         member = guild.get_member(uid)
         if member:
-            mentions.append(member.mention)  # this will ping them
+            mentions.append(member.mention)
         else:
             mentions.append(f"User {uid}")
     mentions_text = " ".join(mentions) or "No one scheduled"
     return f"⏰ **Training Reminder {code}** {mentions_text}"
+
+# ================= AUTO REMINDERS =================
+
+last_sent_midnight = None
+last_sent_5am = None
+
+async def reminder_loop():
+    global last_sent_midnight, last_sent_5am
+    await bot.wait_until_ready()
+
+    while not bot.is_closed():
+        now = datetime.now(uk)
+        today = now.date()
+        channel = bot.get_channel(REMINDER_CHANNEL_ID)
+
+        if channel is None:
+            print("⚠️ Channel not found")
+            await asyncio.sleep(60)
+            continue
+
+        # ===== MIDNIGHT REMINDER =====
+        if now.hour == 0 and now.minute < 2:
+            if last_sent_midnight != today:
+                msg = await build_message(today)
+                await channel.send(msg)
+                last_sent_midnight = today
+                print("✅ Midnight reminder sent")
+
+        # ===== 5AM EMIRATES REMINDER =====
+        if now.hour == 5 and now.minute < 2:
+            if last_sent_5am != today:
+                guild = bot.get_guild(GUILD_ID)
+                member = guild.get_member(EMIRATES_USER_ID)
+                if member:
+                    await channel.send(f"⏰ **5AM Training Reminder** {member.mention}")
+                    print("✅ 5AM reminder sent")
+                else:
+                    print("⚠️ Emirattes user not found")
+                last_sent_5am = today
+
+        await asyncio.sleep(30)
 
 # ================= COMMANDS =================
 
@@ -69,7 +113,7 @@ async def rota_cmd(interaction: discord.Interaction):
     await interaction.response.send_message("\n".join(msgs), ephemeral=True)
 
 @bot.tree.command(name="change", guild=guild_obj)
-async def change_cmd(interaction: discord.Interaction):
+async def change_cmd(interaction: discord.Interation):
     await interaction.response.send_message("Change works!", ephemeral=True)
 
 @bot.tree.command(name="clear", guild=guild_obj)
@@ -90,5 +134,7 @@ async def on_ready():
     print(f"✅ Synced {len(synced)} commands:")
     for cmd in synced:
         print("-", cmd.name)
+
+    bot.loop.create_task(reminder_loop())
 
 bot.run(BOT_TOKEN)
