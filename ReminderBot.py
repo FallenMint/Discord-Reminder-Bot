@@ -1,5 +1,6 @@
 import discord
 from discord.ext import commands
+from discord import app_commands
 from datetime import datetime, date, timedelta
 import pytz
 import os
@@ -25,6 +26,9 @@ MENTION_SCHEDULE = {
     "Sunday":    [1141335656044429322],
 }
 
+# Specific date overrides
+DATE_OVERRIDES = {}
+
 uk = pytz.timezone("Europe/London")
 
 intents = discord.Intents.default()
@@ -39,11 +43,16 @@ guild_obj = discord.Object(id=GUILD_ID)
 def get_cycle_day(d):
     return ((d - CYCLE_START_DATE).days % CYCLE_LENGTH) + 1
 
+
 def get_users_for_date(d):
+    if d in DATE_OVERRIDES:
+        return DATE_OVERRIDES[d]
     return MENTION_SCHEDULE.get(d.strftime("%A"), [])
+
 
 def is_emirattes_scheduled(d):
     return EMIRATES_USER_ID in get_users_for_date(d)
+
 
 async def build_message(d):
     code = f"AA{get_cycle_day(d):02d}"
@@ -78,28 +87,20 @@ async def reminder_loop():
             await asyncio.sleep(60)
             continue
 
-        # ===== MIDNIGHT REMINDER =====
+        # Midnight reminder
         if now.hour == 0 and now.minute < 2:
             if last_sent_midnight != today:
                 msg = await build_message(today)
                 await channel.send(msg)
                 last_sent_midnight = today
-                print("✅ Midnight reminder sent")
 
-        # ===== 5AM EMIRATES REMINDER (ONLY IF SCHEDULED) =====
+        # 5AM reminder only if Emirattes scheduled
         if now.hour == 5 and now.minute < 2:
             if last_sent_5am != today and is_emirattes_scheduled(today):
                 guild = bot.get_guild(GUILD_ID)
                 member = guild.get_member(EMIRATES_USER_ID)
-
                 if member:
-                    await channel.send(
-                        f"⏰ **5AM Training Reminder** {member.mention}"
-                    )
-                    print("✅ 5AM reminder sent (scheduled)")
-                else:
-                    print("⚠️ Emirattes user not found")
-
+                    await channel.send(f"⏰ **5AM Training Reminder** {member.mention}")
                 last_sent_5am = today
 
         await asyncio.sleep(30)
@@ -109,9 +110,8 @@ async def reminder_loop():
 @bot.tree.command(name="next", description="Show tomorrow", guild=guild_obj)
 async def next_cmd(interaction: discord.Interaction):
     tomorrow = datetime.now(uk).date() + timedelta(days=1)
-    await interaction.response.send_message(
-        await build_message(tomorrow), ephemeral=True
-    )
+    await interaction.response.send_message(await build_message(tomorrow), ephemeral=True)
+
 
 @bot.tree.command(name="rota", description="Show next 7 days", guild=guild_obj)
 async def rota_cmd(interaction: discord.Interaction):
@@ -120,67 +120,58 @@ async def rota_cmd(interaction: discord.Interaction):
     for i in range(7):
         d = today + timedelta(days=i)
         msgs.append(f"{d.strftime('%A %d/%m')} - {await build_message(d)}")
-
     await interaction.response.send_message("\n".join(msgs), ephemeral=True)
 
-# ================= FULLY FUNCTIONAL CHANGE COMMAND =================
 
-@bot.tree.command(name="change", description="Add or remove a user from a day", guild=guild_obj)
-async def change_cmd(
-    interaction: discord.Interaction,
-    day: str,
-    user: discord.Member,
-    action: str
-):
-    """
-    Usage:
-    /change day:Monday user:@Someone action:add
-    /change day:Monday user:@Someone action:remove
-    """
+# Generate next 30 days choices
 
-    day = day.capitalize()
-
-    if day not in MENTION_SCHEDULE:
-        await interaction.response.send_message(
-            "❌ Invalid day. Use full day name (e.g., Monday).",
-            ephemeral=True
+def next_30_days():
+    today = datetime.now(uk).date()
+    return [
+        app_commands.Choice(
+            name=(today + timedelta(days=i)).strftime("%d/%m/%Y"),
+            value=(today + timedelta(days=i)).strftime("%Y-%m-%d")
         )
-        return
+        for i in range(30)
+    ]
 
-    if action.lower() not in ["add", "remove"]:
-        await interaction.response.send_message(
-            "❌ Action must be 'add' or 'remove'.",
-            ephemeral=True
-        )
-        return
 
-    user_id = user.id
+@bot.tree.command(name="change", description="Change rota for a specific date", guild=guild_obj)
+@app_commands.describe(date_choice="Pick a date", user="User", action="Add or remove")
+@app_commands.choices(action=[
+    app_commands.Choice(name="Add", value="add"),
+    app_commands.Choice(name="Remove", value="remove"),
+])
+async def change_cmd(interaction: discord.Interaction, date_choice: str, user: discord.Member, action: app_commands.Choice[str]):
+    d = datetime.strptime(date_choice, "%Y-%m-%d").date()
 
-    if action.lower() == "add":
-        if user_id not in MENTION_SCHEDULE[day]:
-            MENTION_SCHEDULE[day].append(user_id)
-            result = f"✅ Added {user.mention} to {day}"
+    if d not in DATE_OVERRIDES:
+        DATE_OVERRIDES[d] = get_users_for_date(d).copy()
+
+    if action.value == "add":
+        if user.id not in DATE_OVERRIDES[d]:
+            DATE_OVERRIDES[d].append(user.id)
+            msg = f"✅ Added {user.mention} to {d.strftime('%d/%m/%Y')}"
         else:
-            result = f"⚠️ {user.mention} is already scheduled on {day}"
-
-    elif action.lower() == "remove":
-        if user_id in MENTION_SCHEDULE[day]:
-            MENTION_SCHEDULE[day].remove(user_id)
-            result = f"✅ Removed {user.mention} from {day}"
+            msg = f"⚠️ {user.mention} already scheduled"
+    else:
+        if user.id in DATE_OVERRIDES[d]:
+            DATE_OVERRIDES[d].remove(user.id)
+            msg = f"✅ Removed {user.mention} from {d.strftime('%d/%m/%Y')}"
         else:
-            result = f"⚠️ {user.mention} was not scheduled on {day}"
+            msg = f"⚠️ {user.mention} wasn't scheduled"
 
-    await interaction.response.send_message(result, ephemeral=True)
+    await interaction.response.send_message(msg, ephemeral=True)
+
 
 # ================= READY =================
 
 @bot.event
 async def on_ready():
     print(f"🚀 Logged in as {bot.user}")
-
     synced = await bot.tree.sync(guild=guild_obj)
-    print(f"✅ Synced {len(synced)} commands")
-
+    print(f"Synced {len(synced)} commands")
     bot.loop.create_task(reminder_loop())
+
 
 bot.run(BOT_TOKEN)
