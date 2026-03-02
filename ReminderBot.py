@@ -50,8 +50,18 @@ def get_users_for_date(d):
     return MENTION_SCHEDULE.get(d.strftime("%A"), [])
 
 
-def is_emirattes_scheduled(d):
-    return EMIRATES_USER_ID in get_users_for_date(d)
+def should_send_at_5am(d):
+    weekday = d.strftime("%A")
+
+    # Default 5AM days
+    if weekday in ["Monday", "Thursday", "Friday"]:
+        return True
+
+    # If Emirates user manually added via /change for that date
+    if d in DATE_OVERRIDES and EMIRATES_USER_ID in DATE_OVERRIDES[d]:
+        return True
+
+    return False
 
 
 async def build_message(d):
@@ -71,11 +81,10 @@ async def build_message(d):
 
 # ================= AUTO REMINDERS =================
 
-last_sent_midnight = None
-last_sent_5am = None
+last_sent = None
 
 async def reminder_loop():
-    global last_sent_midnight, last_sent_5am
+    global last_sent
     await bot.wait_until_ready()
 
     while not bot.is_closed():
@@ -87,21 +96,19 @@ async def reminder_loop():
             await asyncio.sleep(60)
             continue
 
-        # Midnight reminder
-        if now.hour == 0 and now.minute < 2:
-            if last_sent_midnight != today:
+        # Clean old overrides automatically
+        for d in list(DATE_OVERRIDES.keys()):
+            if d < today:
+                del DATE_OVERRIDES[d]
+
+        send_time_5am = should_send_at_5am(today)
+        target_hour = 5 if send_time_5am else 0
+
+        if now.hour == target_hour and now.minute < 2:
+            if last_sent != today:
                 msg = await build_message(today)
                 await channel.send(msg)
-                last_sent_midnight = today
-
-        # 5AM reminder only if Emirattes scheduled
-        if now.hour == 5 and now.minute < 2:
-            if last_sent_5am != today and is_emirattes_scheduled(today):
-                guild = bot.get_guild(GUILD_ID)
-                member = guild.get_member(EMIRATES_USER_ID)
-                if member:
-                    await channel.send(f"⏰ **5AM Training Reminder** {member.mention}")
-                last_sent_5am = today
+                last_sent = today
 
         await asyncio.sleep(30)
 
@@ -122,8 +129,6 @@ async def rota_cmd(interaction: discord.Interaction):
         msgs.append(f"{d.strftime('%A %d/%m')} - {await build_message(d)}")
     await interaction.response.send_message("\n".join(msgs), ephemeral=True)
 
-
-# Generate next 30 days choices
 
 def next_30_days():
     today = datetime.now(uk).date()
@@ -162,7 +167,6 @@ async def change_cmd(interaction: discord.Interaction, date_choice: str, user: d
             msg = f"⚠️ {user.mention} wasn't scheduled"
 
     await interaction.response.send_message(msg, ephemeral=True)
-
 
 # ================= READY =================
 
