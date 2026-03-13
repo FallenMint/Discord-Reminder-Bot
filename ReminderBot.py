@@ -12,8 +12,10 @@ BOT_TOKEN = os.getenv("BOT_TOKEN")
 GUILD_ID = 1381262070409855077
 REMINDER_CHANNEL_ID = 1383751887051821147
 EMIRATES_USER_ID = 1262105376095207526
+
 Owner_Founder_ID = 1382475365557076029
 Bot_Perms_ID = 1472998312708669453
+DISCORD_SUPPORT_ROLE_ID = 702169697239564339
 
 CYCLE_START_DATE = date(2025, 12, 22)
 CYCLE_LENGTH = 14
@@ -28,7 +30,6 @@ MENTION_SCHEDULE = {
     "Sunday":    [1141335656044429322],
 }
 
-# Specific date overrides
 DATE_OVERRIDES = {}
 
 uk = pytz.timezone("Europe/London")
@@ -55,11 +56,9 @@ def get_users_for_date(d):
 def should_send_at_5am(d):
     weekday = d.strftime("%A")
 
-    # Default 5AM days
     if weekday in ["Monday", "Thursday", "Friday"]:
         return True
 
-    # If Emirates user manually added via /change for that date
     if d in DATE_OVERRIDES and EMIRATES_USER_ID in DATE_OVERRIDES[d]:
         return True
 
@@ -98,7 +97,6 @@ async def reminder_loop():
             await asyncio.sleep(60)
             continue
 
-        # Clean old overrides automatically
         for d in list(DATE_OVERRIDES.keys()):
             if d < today:
                 del DATE_OVERRIDES[d]
@@ -132,17 +130,6 @@ async def rota_cmd(interaction: discord.Interaction):
     await interaction.response.send_message("\n".join(msgs), ephemeral=True)
 
 
-def next_30_days():
-    today = datetime.now(uk).date()
-    return [
-        app_commands.Choice(
-            name=(today + timedelta(days=i)).strftime("%d/%m/%Y"),
-            value=(today + timedelta(days=i)).strftime("%Y-%m-%d")
-        )
-        for i in range(30)
-    ]
-
-
 @bot.tree.command(name="change", description="Change rota for a specific date", guild=guild_obj)
 @app_commands.describe(date_choice="Pick a date", user="User", action="Add or remove")
 @app_commands.choices(action=[
@@ -150,6 +137,20 @@ def next_30_days():
     app_commands.Choice(name="Remove", value="remove"),
 ])
 async def change_cmd(interaction: discord.Interaction, date_choice: str, user: discord.Member, action: app_commands.Choice[str]):
+
+    allowed_roles = {
+        Owner_Founder_ID,
+        Bot_Perms_ID,
+        DISCORD_SUPPORT_ROLE_ID
+    }
+
+    if not any(role.id in allowed_roles for role in interaction.user.roles):
+        await interaction.response.send_message(
+            "❌ You do not have permission to use this command.",
+            ephemeral=True
+        )
+        return
+
     d = datetime.strptime(date_choice, "%Y-%m-%d").date()
 
     if d not in DATE_OVERRIDES:
@@ -181,4 +182,3 @@ async def on_ready():
 
 
 bot.run(BOT_TOKEN)
-
