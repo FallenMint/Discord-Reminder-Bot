@@ -12,11 +12,6 @@ print("✅ NEW VERSION RUNNING")
 BOT_TOKEN = os.getenv("BOT_TOKEN")
 GUILD_ID = 1381262070409855077
 REMINDER_CHANNEL_ID = 1383751887051821147
-EMIRATES_USER_ID = 1262105376095207526
-
-Owner_Founder_ID = 1382475365557076029
-Bot_Perms_ID = 1472998312708669453
-DISCORD_SUPPORT_ROLE_ID = 702169697239564339
 
 CYCLE_START_DATE = date(2025, 12, 22)
 CYCLE_LENGTH = 14
@@ -50,13 +45,12 @@ TRAININGS = [
     "HART Training",
 ]
 
-TRAINING_DURATIONS = [1, 3, 5, 7, 10]  # 👈 EDIT TIMES HERE WHENEVER YOU WANT
+TRAINING_DURATIONS = [1, 3, 5, 7, 10]
 
 # ================= TRAINING SYSTEM =================
 
 async def training_waiter(user: discord.User, training: str, buildings: List[str], days: int):
     await asyncio.sleep(days * 86400)
-
     buildings_text = "\n".join(f"• {b}" for b in buildings)
 
     try:
@@ -72,10 +66,7 @@ async def training_waiter(user: discord.User, training: str, buildings: List[str
 
 class DurationSelect(discord.ui.Select):
     def __init__(self):
-        options = [
-            discord.SelectOption(label=f"{d} Days", value=str(d))
-            for d in TRAINING_DURATIONS
-        ]
+        options = [discord.SelectOption(label=f"{d} Days", value=str(d)) for d in TRAINING_DURATIONS]
         super().__init__(placeholder="Select duration...", options=options)
 
     async def callback(self, interaction: discord.Interaction):
@@ -105,18 +96,12 @@ class BuildingModal(discord.ui.Modal, title="Enter Buildings"):
         buildings_list = [b.strip() for b in self.buildings.value.split(",")]
 
         await interaction.response.send_message(
-            f"✅ **{view.training}** started for **{view.days} days**.\n"
-            f"You will receive a DM when it finishes.",
+            f"✅ **{view.training}** started for **{view.days} days**.\nYou will receive a DM when it finishes.",
             ephemeral=True
         )
 
         asyncio.create_task(
-            training_waiter(
-                interaction.user,
-                view.training,
-                buildings_list,
-                view.days
-            )
+            training_waiter(interaction.user, view.training, buildings_list, view.days)
         )
 
 
@@ -131,10 +116,7 @@ class TrainingView(discord.ui.View):
     @discord.ui.button(label="Start Training", style=discord.ButtonStyle.green)
     async def start(self, interaction: discord.Interaction, button: discord.ui.Button):
         if not self.training or not self.days:
-            await interaction.response.send_message(
-                "⚠️ Select training and duration first.",
-                ephemeral=True
-            )
+            await interaction.response.send_message("⚠️ Select training and duration first.", ephemeral=True)
             return
         await interaction.response.send_modal(BuildingModal())
 
@@ -153,8 +135,8 @@ def get_users_for_date(d):
 async def build_message(d):
     code = f"AA{get_cycle_day(d):02d}"
     guild = bot.get_guild(GUILD_ID)
-
     mentions = []
+
     for uid in get_users_for_date(d):
         member = guild.get_member(uid)
         mentions.append(member.mention if member else f"<@{uid}>")
@@ -184,15 +166,27 @@ async def reminder_loop():
 
 @bot.tree.command(name="training", guild=guild_obj)
 async def training_cmd(interaction: discord.Interaction):
-    if not any(role.id == DISCORD_SUPPORT_ROLE_ID for role in interaction.user.roles):
-        await interaction.response.send_message("❌ No permission", ephemeral=True)
-        return
-
     await interaction.response.send_message(
         "Set up a training:",
         view=TrainingView(),
         ephemeral=True
     )
+
+
+@bot.tree.command(name="next", guild=guild_obj)
+async def next_cmd(interaction: discord.Interaction):
+    tomorrow = datetime.now(uk).date() + timedelta(days=1)
+    await interaction.response.send_message(await build_message(tomorrow), ephemeral=True)
+
+
+@bot.tree.command(name="rota", guild=guild_obj)
+async def rota_cmd(interaction: discord.Interaction):
+    today = datetime.now(uk).date()
+    msgs = []
+    for i in range(7):
+        d = today + timedelta(days=i)
+        msgs.append(f"{d.strftime('%A %d/%m')} - {await build_message(d)}")
+    await interaction.response.send_message("\n".join(msgs), ephemeral=True)
 
 
 @bot.tree.command(name="change", guild=guild_obj)
@@ -204,7 +198,8 @@ async def change_cmd(interaction: discord.Interaction, date_choice: str, user: d
         DATE_OVERRIDES[d] = get_users_for_date(d).copy()
 
     if action.lower() == "add":
-        DATE_OVERRIDES[d].append(user.id)
+        if user.id not in DATE_OVERRIDES[d]:
+            DATE_OVERRIDES[d].append(user.id)
     else:
         if user.id in DATE_OVERRIDES[d]:
             DATE_OVERRIDES[d].remove(user.id)
