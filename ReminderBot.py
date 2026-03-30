@@ -71,28 +71,30 @@ class TrainingSelect(discord.ui.Select):
             discord.SelectOption(label=name, description=f"{days} day course")
             for name, days in TRAININGS.items()
         ]
-        super().__init__(placeholder="Select the training course...", options=options)
+        super().__init__(
+            placeholder="Select the training course...",
+            min_values=1,
+            max_values=1,
+            options=options
+        )
 
     async def callback(self, interaction: discord.Interaction):
-        view: TrainingView = self.view
-        view.training_choice = self.values[0]
+        self.view.training_choice = self.values[0]
         await interaction.response.defer()
 
 class TrainingModal(discord.ui.Modal, title="Enter Buildings Running This Training"):
     buildings = discord.ui.TextInput(
         label="Buildings (comma separated)",
-        placeholder="Station 1, Station 4, Airport, Harbour",
         required=True
     )
 
     async def on_submit(self, interaction: discord.Interaction):
-        view: TrainingView = self.view
         buildings_list = [b.strip() for b in self.buildings.value.split(",")]
-        training_name = view.training_choice
+        training_name = self.view.training_choice
         days = TRAININGS[training_name]
 
         await interaction.response.send_message(
-            f"✅ **{training_name}** started.\nI will DM you in **{days} days**.",
+            f"✅ **{training_name}** started. I will DM you in **{days} days**.",
             ephemeral=True
         )
 
@@ -109,7 +111,7 @@ class TrainingView(discord.ui.View):
     @discord.ui.button(label="Next", style=discord.ButtonStyle.green)
     async def next_button(self, interaction: discord.Interaction, button: discord.ui.Button):
         if not self.training_choice:
-            await interaction.response.send_message("⚠️ Please select a training first.", ephemeral=True)
+            await interaction.response.send_message("⚠️ Select a training first.", ephemeral=True)
             return
         await interaction.response.send_modal(TrainingModal())
 
@@ -125,11 +127,9 @@ def get_users_for_date(d):
 
 def should_send_at_5am(d):
     weekday = d.strftime("%A")
-    if weekday in ["Monday", "Thursday", "Friday"]:
-        return True
-    if d in DATE_OVERRIDES and EMIRATES_USER_ID in DATE_OVERRIDES[d]:
-        return True
-    return False
+    return weekday in ["Monday", "Thursday", "Friday"] or (
+        d in DATE_OVERRIDES and EMIRATES_USER_ID in DATE_OVERRIDES[d]
+    )
 
 async def build_message(d):
     code = f"AA{get_cycle_day(d):02d}"
@@ -138,10 +138,33 @@ async def build_message(d):
     for uid in get_users_for_date(d):
         member = guild.get_member(uid)
         mentions.append(member.mention if member else f"<@{uid}>")
-    mentions_text = " ".join(mentions) or "No one scheduled"
-    return f"⏰ **Training Reminder {code}** {mentions_text}"
+    return f"⏰ **Training Reminder {code}** {' '.join(mentions)}"
 
-# ================= /change DATE DROPDOWN =================
+# ================= REMINDER LOOP =================
+
+last_sent = None
+
+async def reminder_loop():
+    global last_sent
+    await bot.wait_until_ready()
+
+    while not bot.is_closed():
+        now = datetime.now(uk)
+        today = now.date()
+        channel = bot.get_channel(REMINDER_CHANNEL_ID)
+
+        if channel:
+            send_time_5am = should_send_at_5am(today)
+            target_hour = 5 if send_time_5am else 0
+
+            if now.hour == target_hour and now.minute < 2:
+                if last_sent != today:
+                    await channel.send(await build_message(today))
+                    last_sent = today
+
+        await asyncio.sleep(30)
+
+# ================= /change =================
 
 def upcoming_dates(days=14):
     today = datetime.now(uk).date()
@@ -156,11 +179,15 @@ class DateSelect(discord.ui.Select):
             )
             for d in upcoming_dates()
         ]
-        super().__init__(placeholder="Select the date...", options=options)
+        super().__init__(
+            placeholder="Select the date...",
+            min_values=1,
+            max_values=1,
+            options=options
+        )
 
     async def callback(self, interaction: discord.Interaction):
-        view: ChangeView = self.view
-        view.selected_date = datetime.strptime(self.values[0], "%Y-%m-%d").date()
+        self.view.selected_date = datetime.strptime(self.values[0], "%Y-%m-%d").date()
         await interaction.response.defer()
 
 class ChangeView(discord.ui.View):
@@ -182,13 +209,13 @@ class ChangeView(discord.ui.View):
             DATE_OVERRIDES[d] = list(get_users_for_date(d))
 
         if self.action == "add":
-            DATE_OVERRIDES[d].append(self.target_user.id)
-            msg = f"✅ Added {self.target_user.mention} to {d.strftime('%A %d/%m/%Y')}"
+            if self.target_user.id not in DATE_OVERRIDES[d]:
+                DATE_OVERRIDES[d].append(self.target_user.id)
         else:
-            DATE_OVERRIDES[d].remove(self.target_user.id)
-            msg = f"✅ Removed {self.target_user.mention} from {d.strftime('%A %d/%m/%Y')}"
+            if self.target_user.id in DATE_OVERRIDES[d]:
+                DATE_OVERRIDES[d].remove(self.target_user.id)
 
-        await interaction.response.send_message(msg, ephemeral=True)
+        await interaction.response.send_message("✅ Rota updated.", ephemeral=True)
 
 # ================= COMMANDS =================
 
@@ -199,17 +226,6 @@ async def training_cmd(interaction: discord.Interaction):
         return
     await interaction.response.send_message("Select training:", view=TrainingView(), ephemeral=True)
 
-@bot.tree.command(name="next", description="Show tomorrow", guild=guild_obj)
-async def next_cmd(interaction: discord.Interaction):
-    tomorrow = datetime.now(uk).date() + timedelta(days=1)
-    await interaction.response.send_message(await build_message(tomorrow), ephemeral=True)
-
-@bot.tree.command(name="rota", description="Show next 7 days", guild=guild_obj)
-async def rota_cmd(interaction: discord.Interaction):
-    today = datetime.now(uk).date()
-    msgs = [f"{(today + timedelta(days=i)).strftime('%A %d/%m')} - {await build_message(today + timedelta(days=i))}" for i in range(7)]
-    await interaction.response.send_message("\n".join(msgs), ephemeral=True)
-
 @bot.tree.command(name="change", description="Change rota", guild=guild_obj)
 @app_commands.describe(user="User", action="Add or remove")
 @app_commands.choices(action=[
@@ -217,16 +233,17 @@ async def rota_cmd(interaction: discord.Interaction):
     app_commands.Choice(name="Remove", value="remove"),
 ])
 async def change_cmd(interaction: discord.Interaction, user: discord.Member, action: app_commands.Choice[str]):
-    if not any(role.id in {Owner_Founder_ID, Bot_Perms_ID, DISCORD_SUPPORT_ROLE_ID} for role in interaction.user.roles):
-        await interaction.response.send_message("❌ No permission.", ephemeral=True)
-        return
     await interaction.response.send_message("Select date:", view=ChangeView(user, action.value), ephemeral=True)
 
-# ================= READY =================
+@bot.tree.command(name="next", description="Show tomorrow", guild=guild_obj)
+async def next_cmd(interaction: discord.Interaction):
+    tomorrow = datetime.now(uk).date() + timedelta(days=1)
+    await interaction.response.send_message(await build_message(tomorrow), ephemeral=True)
 
 @bot.event
 async def on_ready():
     print(f"🚀 Logged in as {bot.user}")
     await bot.tree.sync(guild=guild_obj)
+    bot.loop.create_task(reminder_loop())
 
 bot.run(BOT_TOKEN)
