@@ -41,6 +41,99 @@ intents.members = True
 bot = commands.Bot(command_prefix="!", intents=intents)
 guild_obj = discord.Object(id=GUILD_ID)
 
+# ================= TRAINING SYSTEM =================
+
+TRAININGS = {
+    "Ambulance Officer": 5,
+    "Critical Care": 5,
+    "HART Training": 5,
+    "Advanced Paramedic": 5,
+    "Mass Casualty Management": 5,
+    "HazMat Medic": 5,
+}
+
+async def training_waiter(user: discord.User, training: str, buildings: list[str], days: int):
+    await asyncio.sleep(days * 24 * 60 * 60)
+
+    buildings_text = "\n".join(f"• {b}" for b in buildings)
+
+    try:
+        await user.send(
+            f"🎓 **Training Complete!**\n\n"
+            f"**Course:** {training}\n"
+            f"**Buildings:**\n{buildings_text}\n\n"
+            f"Duration: {days} days"
+        )
+    except:
+        pass
+
+
+class TrainingSelect(discord.ui.Select):
+    def __init__(self):
+        options = [
+            discord.SelectOption(label=name, description=f"{days} day course")
+            for name, days in TRAININGS.items()
+        ]
+        super().__init__(
+            placeholder="Select the training course...",
+            min_values=1,
+            max_values=1,
+            options=options
+        )
+
+    async def callback(self, interaction: discord.Interaction):
+        view: TrainingView = self.view
+        view.training_choice = self.values[0]
+        await interaction.response.defer()
+
+
+class TrainingModal(discord.ui.Modal, title="Enter Buildings Running This Training"):
+    buildings = discord.ui.TextInput(
+        label="Buildings (comma separated)",
+        placeholder="Station 1, Station 4, Airport, Harbour",
+        required=True
+    )
+
+    async def on_submit(self, interaction: discord.Interaction):
+        view: TrainingView = self.view
+
+        buildings_list = [b.strip() for b in self.buildings.value.split(",")]
+        training_name = view.training_choice
+        days = TRAININGS[training_name]
+
+        await interaction.response.send_message(
+            f"✅ **{training_name}** started.\n"
+            f"I will DM you in **{days} days** when it finishes.",
+            ephemeral=True
+        )
+
+        asyncio.create_task(
+            training_waiter(
+                interaction.user,
+                training_name,
+                buildings_list,
+                days
+            )
+        )
+
+
+class TrainingView(discord.ui.View):
+    def __init__(self):
+        super().__init__(timeout=120)
+        self.training_choice = None
+        self.add_item(TrainingSelect())
+
+    @discord.ui.button(label="Next", style=discord.ButtonStyle.green)
+    async def next_button(self, interaction: discord.Interaction, button: discord.ui.Button):
+        if not self.training_choice:
+            await interaction.response.send_message(
+                "⚠️ Please select a training first.",
+                ephemeral=True
+            )
+            return
+
+        await interaction.response.send_modal(TrainingModal())
+
 # ================= ROTATION =================
 
 def get_cycle_day(d):
@@ -114,6 +207,23 @@ async def reminder_loop():
 
 # ================= COMMANDS =================
 
+@bot.tree.command(name="training", description="Start a training tracker", guild=guild_obj)
+async def training_cmd(interaction: discord.Interaction):
+
+    if not any(role.id == DISCORD_SUPPORT_ROLE_ID for role in interaction.user.roles):
+        await interaction.response.send_message(
+            "❌ Only Discord Support can use this.",
+            ephemeral=True
+        )
+        return
+
+    await interaction.response.send_message(
+        "Select the training you are running:",
+        view=TrainingView(),
+        ephemeral=True
+    )
+
+
 @bot.tree.command(name="next", description="Show tomorrow", guild=guild_obj)
 async def next_cmd(interaction: discord.Interaction):
     tomorrow = datetime.now(uk).date() + timedelta(days=1)
@@ -128,48 +238,6 @@ async def rota_cmd(interaction: discord.Interaction):
         d = today + timedelta(days=i)
         msgs.append(f"{d.strftime('%A %d/%m')} - {await build_message(d)}")
     await interaction.response.send_message("\n".join(msgs), ephemeral=True)
-
-
-@bot.tree.command(name="change", description="Change rota for a specific date", guild=guild_obj)
-@app_commands.describe(date_choice="Pick a date", user="User", action="Add or remove")
-@app_commands.choices(action=[
-    app_commands.Choice(name="Add", value="add"),
-    app_commands.Choice(name="Remove", value="remove"),
-])
-async def change_cmd(interaction: discord.Interaction, date_choice: str, user: discord.Member, action: app_commands.Choice[str]):
-
-    allowed_roles = {
-        Owner_Founder_ID,
-        Bot_Perms_ID,
-        DISCORD_SUPPORT_ROLE_ID
-    }
-
-    if not any(role.id in allowed_roles for role in interaction.user.roles):
-        await interaction.response.send_message(
-            "❌ You do not have permission to use this command.",
-            ephemeral=True
-        )
-        return
-
-    d = datetime.strptime(date_choice, "%Y-%m-%d").date()
-
-    if d not in DATE_OVERRIDES:
-        DATE_OVERRIDES[d] = get_users_for_date(d).copy()
-
-    if action.value == "add":
-        if user.id not in DATE_OVERRIDES[d]:
-            DATE_OVERRIDES[d].append(user.id)
-            msg = f"✅ Added {user.mention} to {d.strftime('%d/%m/%Y')}"
-        else:
-            msg = f"⚠️ {user.mention} already scheduled"
-    else:
-        if user.id in DATE_OVERRIDES[d]:
-            DATE_OVERRIDES[d].remove(user.id)
-            msg = f"✅ Removed {user.mention} from {d.strftime('%d/%m/%Y')}"
-        else:
-            msg = f"⚠️ {user.mention} wasn't scheduled"
-
-    await interaction.response.send_message(msg, ephemeral=True)
 
 # ================= READY =================
 
