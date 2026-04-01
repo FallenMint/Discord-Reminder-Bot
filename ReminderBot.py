@@ -16,6 +16,9 @@ REMINDER_CHANNEL_ID = 1383751887051821147
 CYCLE_START_DATE = date(2025, 12, 22)
 CYCLE_LENGTH = 14
 
+EMIRATES_ID = 1262105376095207526
+SPECIAL_5AM_DATES = set()
+
 MENTION_SCHEDULE = {
     "Monday":    [1262105376095207526],
     "Tuesday":   [285344747743346688],
@@ -52,7 +55,6 @@ TRAINING_DURATIONS = [1, 3, 5, 7, 10]
 async def training_waiter(user: discord.User, training: str, buildings: List[str], days: int):
     await asyncio.sleep(days * 86400)
     buildings_text = "\n".join(f"• {b}" for b in buildings)
-
     try:
         await user.send(
             f"🎓 **Training Complete!**\n\n"
@@ -63,7 +65,6 @@ async def training_waiter(user: discord.User, training: str, buildings: List[str
     except:
         pass
 
-
 class DurationSelect(discord.ui.Select):
     def __init__(self):
         options = [discord.SelectOption(label=f"{d} Days", value=str(d)) for d in TRAINING_DURATIONS]
@@ -73,7 +74,6 @@ class DurationSelect(discord.ui.Select):
         self.view.days = int(self.values[0])
         await interaction.response.defer()
 
-
 class TrainingSelect(discord.ui.Select):
     def __init__(self):
         options = [discord.SelectOption(label=t) for t in TRAININGS]
@@ -82,7 +82,6 @@ class TrainingSelect(discord.ui.Select):
     async def callback(self, interaction: discord.Interaction):
         self.view.training = self.values[0]
         await interaction.response.defer()
-
 
 class BuildingModal(discord.ui.Modal, title="Enter Buildings"):
     buildings = discord.ui.TextInput(
@@ -104,7 +103,6 @@ class BuildingModal(discord.ui.Modal, title="Enter Buildings"):
             training_waiter(interaction.user, view.training, buildings_list, view.days)
         )
 
-
 class TrainingView(discord.ui.View):
     def __init__(self):
         super().__init__(timeout=180)
@@ -120,45 +118,70 @@ class TrainingView(discord.ui.View):
             return
         await interaction.response.send_modal(BuildingModal())
 
-# ================= ROTATION =================
+# ================= ROTATION HELPERS =================
 
 def get_cycle_day(d):
     return ((d - CYCLE_START_DATE).days % CYCLE_LENGTH) + 1
-
 
 def get_users_for_date(d):
     if d in DATE_OVERRIDES:
         return DATE_OVERRIDES[d]
     return MENTION_SCHEDULE.get(d.strftime("%A"), [])
 
+def get_week_dates(d: date):
+    start = d - timedelta(days=d.weekday())
+    return [start + timedelta(days=i) for i in range(7)]
 
-async def build_message(d):
+async def build_message_for_users(d, user_ids):
     code = f"AA{get_cycle_day(d):02d}"
     guild = bot.get_guild(GUILD_ID)
     mentions = []
-
-    for uid in get_users_for_date(d):
+    for uid in user_ids:
         member = guild.get_member(uid)
         mentions.append(member.mention if member else f"<@{uid}>")
-
     return f"⏰ **Training Reminder {code}** {' '.join(mentions)}"
 
 # ================= AUTO REMINDERS =================
 
-last_sent = None
-
 async def reminder_loop():
-    global last_sent
     await bot.wait_until_ready()
+
+    sent_midnight = None
+    sent_5am = None
 
     while not bot.is_closed():
         now = datetime.now(uk)
         today = now.date()
         channel = bot.get_channel(REMINDER_CHANNEL_ID)
 
-        if channel and last_sent != today and now.hour == 5 and now.minute < 2:
-            await channel.send(await build_message(today))
-            last_sent = today
+        if not channel:
+            await asyncio.sleep(30)
+            continue
+
+        users_today = get_users_for_date(today)
+
+        emirates_users = []
+        other_users = []
+
+        for uid in users_today:
+            if uid == EMIRATES_ID:
+                emirates_users.append(uid)
+            else:
+                other_users.append(uid)
+
+        # Midnight
+        if now.hour == 0 and now.minute < 2 and sent_midnight != today:
+            if other_users:
+                msg = await build_message_for_users(today, other_users)
+                await channel.send(msg)
+            sent_midnight = today
+
+        # 5AM
+        if now.hour == 5 and now.minute < 2 and sent_5am != today:
+            if emirates_users:
+                msg = await build_message_for_users(today, emirates_users)
+                await channel.send(msg)
+            sent_5am = today
 
         await asyncio.sleep(30)
 
@@ -172,12 +195,12 @@ async def training_cmd(interaction: discord.Interaction):
         ephemeral=True
     )
 
-
 @bot.tree.command(name="next", guild=guild_obj)
 async def next_cmd(interaction: discord.Interaction):
     tomorrow = datetime.now(uk).date() + timedelta(days=1)
-    await interaction.response.send_message(await build_message(tomorrow), ephemeral=True)
-
+    users = get_users_for_date(tomorrow)
+    msg = await build_message_for_users(tomorrow, users)
+    await interaction.response.send_message(msg, ephemeral=True)
 
 @bot.tree.command(name="rota", guild=guild_obj)
 async def rota_cmd(interaction: discord.Interaction):
@@ -185,9 +208,9 @@ async def rota_cmd(interaction: discord.Interaction):
     msgs = []
     for i in range(7):
         d = today + timedelta(days=i)
-        msgs.append(f"{d.strftime('%A %d/%m')} - {await build_message(d)}")
+        users = get_users_for_date(d)
+        msgs.append(f"{d.strftime('%A %d/%m')} - {await build_message_for_users(d, users)}")
     await interaction.response.send_message("\n".join(msgs), ephemeral=True)
-
 
 @bot.tree.command(name="change", guild=guild_obj)
 @app_commands.describe(date_choice="YYYY-MM-DD", user="User", action="add/remove")
@@ -200,7 +223,12 @@ async def change_cmd(interaction: discord.Interaction, date_choice: str, user: d
     if action.lower() == "add":
         if user.id not in DATE_OVERRIDES[d]:
             DATE_OVERRIDES[d].append(user.id)
-    else:
+
+        if user.id == EMIRATES_ID:
+            for wd in get_week_dates(d):
+                SPECIAL_5AM_DATES.add(wd)
+
+    elif action.lower() == "remove":
         if user.id in DATE_OVERRIDES[d]:
             DATE_OVERRIDES[d].remove(user.id)
 
