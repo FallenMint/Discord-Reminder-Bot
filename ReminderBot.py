@@ -52,14 +52,13 @@ TRAINING_DURATIONS = [1, 3, 5, 7, 10]
 
 # ================= TRAINING SYSTEM =================
 
-async def training_waiter(user: discord.User, training: str, buildings: List[str], days: int):
+async def training_waiter(user: discord.User, training: str, details: str, days: int):
     await asyncio.sleep(days * 86400)
-    buildings_text = "\n".join(f"• {b}" for b in buildings)
     try:
         await user.send(
             f"🎓 **Training Complete!**\n\n"
             f"**Course:** {training}\n"
-            f"**Buildings:**\n{buildings_text}\n\n"
+            f"**Details you entered:**\n{details}\n\n"
             f"Duration: {days} days"
         )
     except:
@@ -83,16 +82,17 @@ class TrainingSelect(discord.ui.Select):
         self.view.training = self.values[0]
         await interaction.response.defer()
 
-class BuildingModal(discord.ui.Modal, title="Enter Buildings"):
-    buildings = discord.ui.TextInput(
-        label="Buildings (comma separated)",
-        placeholder="Station 1, Station 4, Airport",
+class BuildingModal(discord.ui.Modal, title="Training Details"):
+    details = discord.ui.TextInput(
+        label="Enter any details for this training",
+        placeholder="Write anything here...",
+        style=discord.TextStyle.paragraph,
         required=True
     )
 
     async def on_submit(self, interaction: discord.Interaction):
         view: TrainingView = self.view
-        buildings_list = [b.strip() for b in self.buildings.value.split(",")]
+        raw_text = self.details.value
 
         await interaction.response.send_message(
             f"✅ **{view.training}** started for **{view.days} days**.\nYou will receive a DM when it finishes.",
@@ -100,7 +100,7 @@ class BuildingModal(discord.ui.Modal, title="Enter Buildings"):
         )
 
         asyncio.create_task(
-            training_waiter(interaction.user, view.training, buildings_list, view.days)
+            training_waiter(interaction.user, view.training, raw_text, view.days)
         )
 
 class TrainingView(discord.ui.View):
@@ -127,10 +127,6 @@ def get_users_for_date(d):
     if d in DATE_OVERRIDES:
         return DATE_OVERRIDES[d]
     return MENTION_SCHEDULE.get(d.strftime("%A"), [])
-
-def get_week_dates(d: date):
-    start = d - timedelta(days=d.weekday())
-    return [start + timedelta(days=i) for i in range(7)]
 
 async def build_message_for_users(d, user_ids):
     code = f"AA{get_cycle_day(d):02d}"
@@ -169,14 +165,12 @@ async def reminder_loop():
             else:
                 other_users.append(uid)
 
-        # Midnight
         if now.hour == 0 and now.minute < 2 and sent_midnight != today:
             if other_users:
                 msg = await build_message_for_users(today, other_users)
                 await channel.send(msg)
             sent_midnight = today
 
-        # 5AM
         if now.hour == 5 and now.minute < 2 and sent_5am != today:
             if emirates_users:
                 msg = await build_message_for_users(today, emirates_users)
@@ -212,27 +206,35 @@ async def rota_cmd(interaction: discord.Interaction):
         msgs.append(f"{d.strftime('%A %d/%m')} - {await build_message_for_users(d, users)}")
     await interaction.response.send_message("\n".join(msgs), ephemeral=True)
 
+# ✅ NEW CHANGE COMMAND
 @bot.tree.command(name="change", guild=guild_obj)
-@app_commands.describe(date_choice="YYYY-MM-DD", user="User", action="add/remove")
-async def change_cmd(interaction: discord.Interaction, date_choice: str, user: discord.Member, action: str):
-    d = datetime.strptime(date_choice, "%Y-%m-%d").date()
+@app_commands.describe(date_choice="DD/MM/YYYY", user="User to swap onto this date")
+async def change_cmd(interaction: discord.Interaction, date_choice: str, user: discord.Member):
+    try:
+        d = datetime.strptime(date_choice, "%d/%m/%Y").date()
+    except ValueError:
+        await interaction.response.send_message("❌ Use date format DD/MM/YYYY", ephemeral=True)
+        return
 
-    if d not in DATE_OVERRIDES:
-        DATE_OVERRIDES[d] = get_users_for_date(d).copy()
+    current_users = get_users_for_date(d).copy()
 
-    if action.lower() == "add":
-        if user.id not in DATE_OVERRIDES[d]:
-            DATE_OVERRIDES[d].append(user.id)
+    if not current_users:
+        await interaction.response.send_message("⚠️ No one is assigned to this date.", ephemeral=True)
+        return
 
-        if user.id == EMIRATES_ID:
-            for wd in get_week_dates(d):
-                SPECIAL_5AM_DATES.add(wd)
+    DATE_OVERRIDES[d] = current_users
 
-    elif action.lower() == "remove":
-        if user.id in DATE_OVERRIDES[d]:
-            DATE_OVERRIDES[d].remove(user.id)
+    if user.id in current_users:
+        await interaction.response.send_message("⚠️ That user is already assigned to this date.", ephemeral=True)
+        return
 
-    await interaction.response.send_message("✅ Updated", ephemeral=True)
+    swapped_out = DATE_OVERRIDES[d][0]
+    DATE_OVERRIDES[d][0] = user.id
+
+    await interaction.response.send_message(
+        f"🔄 Swapped <@{swapped_out}> with {user.mention} on {d.strftime('%A %d/%m/%Y')}",
+        ephemeral=True
+    )
 
 # ================= READY =================
 
