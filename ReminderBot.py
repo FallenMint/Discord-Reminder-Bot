@@ -105,22 +105,21 @@ async def training_waiter(user: discord.User, training: str, details: str, days:
     except:
         pass
 
-# ✅ TEST DM WAITER
-async def test_dm_waiter(user: discord.User):
-    await asyncio.sleep(5)
-    try:
-        await user.send("✅ Test DM received after 5 seconds. Your reminders are working.")
-    except:
-        pass
+
+# ================= UI COMPONENTS =================
 
 class DurationSelect(discord.ui.Select):
     def __init__(self):
-        options = [discord.SelectOption(label=f"{d} Days", value=str(d)) for d in TRAINING_DURATIONS]
+        options = [
+            discord.SelectOption(label=f"{d} Days", value=str(d))
+            for d in TRAINING_DURATIONS
+        ]
         super().__init__(placeholder="Select duration...", options=options)
 
     async def callback(self, interaction: discord.Interaction):
         self.view.days = int(self.values[0])
-        await interaction.response.defer()
+        await interaction.response.edit_message(view=self.view)
+
 
 class TrainingSelect(discord.ui.Select):
     def __init__(self):
@@ -129,7 +128,8 @@ class TrainingSelect(discord.ui.Select):
 
     async def callback(self, interaction: discord.Interaction):
         self.view.training = self.values[0]
-        await interaction.response.defer()
+        await interaction.response.edit_message(view=self.view)
+
 
 class BuildingModal(discord.ui.Modal, title="Training Details"):
     details = discord.ui.TextInput(
@@ -138,18 +138,30 @@ class BuildingModal(discord.ui.Modal, title="Training Details"):
         required=True
     )
 
+    def __init__(self):
+        super().__init__()
+        self.view: "TrainingView | None" = None
+
     async def on_submit(self, interaction: discord.Interaction):
-        view: TrainingView = self.view
+        if not self.view:
+            await interaction.response.send_message(
+                "❌ Internal error: missing view context.",
+                ephemeral=True
+            )
+            return
+
         raw_text = self.details.value
 
         await interaction.response.send_message(
-            f"✅ **{view.training}** started for **{view.days} days**.\nYou will receive a DM when it finishes.",
+            f"✅ **{self.view.training}** started for **{self.view.days} days**.\n"
+            f"You will receive a DM when it finishes.",
             ephemeral=True
         )
 
         asyncio.create_task(
-            training_waiter(interaction.user, view.training, raw_text, view.days)
+            training_waiter(interaction.user, self.view.training, raw_text, self.view.days)
         )
+
 
 class TrainingView(discord.ui.View):
     def __init__(self):
@@ -161,29 +173,43 @@ class TrainingView(discord.ui.View):
 
     @discord.ui.button(label="Start Training", style=discord.ButtonStyle.green)
     async def start(self, interaction: discord.Interaction, button: discord.ui.Button):
+
         if not self.training or not self.days:
-            await interaction.response.send_message("⚠️ Select training and duration first.", ephemeral=True)
+            await interaction.response.send_message(
+                "⚠️ Select training and duration first.",
+                ephemeral=True
+            )
             return
-        await interaction.response.send_modal(BuildingModal())
+
+        modal = BuildingModal()
+        modal.view = self  # 🔥 FIX: attach view properly
+
+        await interaction.response.send_modal(modal)
+
 
 # ================= ROTATION HELPERS =================
 
 def get_cycle_day(d):
     return ((d - CYCLE_START_DATE).days % CYCLE_LENGTH) + 1
 
+
 def get_users_for_date(d):
     if d in DATE_OVERRIDES:
         return DATE_OVERRIDES[d]
     return MENTION_SCHEDULE.get(d.strftime("%A"), [])
 
+
 async def build_message_for_users(d, user_ids):
     code = f"AA{get_cycle_day(d):02d}"
     guild = bot.get_guild(GUILD_ID)
+
     mentions = []
     for uid in user_ids:
         member = guild.get_member(uid)
         mentions.append(member.mention if member else f"<@{uid}>")
+
     return f"⏰ **Training Reminder {code}** {' '.join(mentions)}"
+
 
 # ================= AUTO REMINDERS =================
 
@@ -220,11 +246,17 @@ async def reminder_loop():
 
         await asyncio.sleep(30)
 
+
 # ================= COMMANDS =================
 
 @bot.tree.command(name="training", guild=guild_obj)
 async def training_cmd(interaction: discord.Interaction):
-    await interaction.response.send_message("Set up a training:", view=TrainingView(), ephemeral=True)
+    await interaction.response.send_message(
+        "Set up a training:",
+        view=TrainingView(),
+        ephemeral=True
+    )
+
 
 @bot.tree.command(name="next", guild=guild_obj)
 async def next_cmd(interaction: discord.Interaction):
@@ -233,15 +265,19 @@ async def next_cmd(interaction: discord.Interaction):
     msg = await build_message_for_users(tomorrow, users)
     await interaction.response.send_message(msg, ephemeral=True)
 
+
 @bot.tree.command(name="rota", guild=guild_obj)
 async def rota_cmd(interaction: discord.Interaction):
     today = datetime.now(uk).date()
     msgs = []
+
     for i in range(7):
         d = today + timedelta(days=i)
         users = get_users_for_date(d)
         msgs.append(f"{d.strftime('%A %d/%m')} - {await build_message_for_users(d, users)}")
+
     await interaction.response.send_message("\n".join(msgs), ephemeral=True)
+
 
 @bot.tree.command(name="change", guild=guild_obj)
 @app_commands.describe(date_choice="DD/MM/YYYY", user="User to swap onto this date")
@@ -254,7 +290,7 @@ async def change_cmd(interaction: discord.Interaction, date_choice: str, user: d
 
     current_users = get_users_for_date(d).copy()
     if not current_users:
-        await interaction.response.send_message("⚠️ No one is assigned to this date.", ephemeral=True)
+        await interaction.response.send_message("⚠️ No one assigned to this date.", ephemeral=True)
         return
 
     DATE_OVERRIDES[d] = current_users
@@ -266,11 +302,6 @@ async def change_cmd(interaction: discord.Interaction, date_choice: str, user: d
         ephemeral=True
     )
 
-# ✅ TEST DM COMMAND
-@bot.tree.command(name="testdm", guild=guild_obj)
-async def testdm_cmd(interaction: discord.Interaction):
-    await interaction.response.send_message("⏳ Sending test DM in 5 seconds...", ephemeral=True)
-    asyncio.create_task(test_dm_waiter(interaction.user))
 
 # ================= READY =================
 
@@ -279,5 +310,6 @@ async def on_ready():
     print(f"🚀 Logged in as {bot.user}")
     await bot.tree.sync(guild=guild_obj)
     bot.loop.create_task(reminder_loop())
+
 
 bot.run(BOT_TOKEN)
