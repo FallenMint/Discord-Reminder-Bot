@@ -8,7 +8,13 @@ import asyncio
 
 print("✅ NEW VERSION RUNNING")
 
+from dotenv import load_dotenv
+load_dotenv()
+
 BOT_TOKEN = os.getenv("BOT_TOKEN")
+
+if not BOT_TOKEN:
+    raise RuntimeError("BOT_TOKEN missing - check .env file")
 GUILD_ID = 1381262070409855077
 REMINDER_CHANNEL_ID = 1383751887051821147
 
