@@ -215,28 +215,28 @@ class TrainingView(discord.ui.View):
         self.add_item(TrainingSelect())
         self.add_item(DurationSelect())
 
-@discord.ui.button(label="Start Training", style=discord.ButtonStyle.green)
-async def start(self, interaction: discord.Interaction, button: discord.ui.Button):
+    @discord.ui.button(label="Start Training", style=discord.ButtonStyle.green)
+    async def start(self, interaction: discord.Interaction, button: discord.ui.Button):
 
-    if not self.training or not self.days:
-        await interaction.response.send_message(
-            "⚠️ Select training and duration first.",
-            ephemeral=True
-        )
-        return
+        if not self.training or not self.days:
+            await interaction.response.send_message(
+                "⚠️ Select training and duration first.",
+                ephemeral=True
+            )
+            return
 
-    key = (interaction.user.id, self.training)
+        key = (interaction.user.id, self.training)
 
-    if active_training_tasks.get(key):
-        await interaction.response.send_message(
-            "⚠️ You already have this training running.",
-            ephemeral=True
-        )
-        return
+        if active_training_tasks.get(key):
+            await interaction.response.send_message(
+                "⚠️ You already have this training running.",
+                ephemeral=True
+            )
+            return
 
-    active_training_tasks[key] = True
+        active_training_tasks[key] = True
 
-    await interaction.response.send_modal(BuildingModal())
+        await interaction.response.send_modal(BuildingModal())
 # ================= ROTATION HELPERS =================
 
 def get_cycle_day(d):
