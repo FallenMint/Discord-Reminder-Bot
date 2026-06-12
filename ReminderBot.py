@@ -2,7 +2,7 @@ import discord
 from discord.ext import commands
 from discord import app_commands
 from datetime import datetime, date, timedelta
-import pytz
+from zoneinfo import ZoneInfo
 import os
 import asyncio
 
@@ -35,7 +35,7 @@ MENTION_SCHEDULE = {
 
 DATE_OVERRIDES = {}
 
-uk = pytz.timezone("Europe/London")
+uk = ZoneInfo("Europe/London")
 
 intents = discord.Intents.default()
 intents.guilds = True
@@ -226,8 +226,16 @@ class TrainingView(discord.ui.View):
             )
             return
 
-        await interaction.response.send_modal(BuildingModal())
+        key = (interaction.user.id, self.training)
 
+        if active_training_tasks.get(key):
+            await interaction.response.send_message(
+                "⚠️ You already have this training running.",
+                ephemeral=True
+            )
+            return
+
+        await interaction.response.send_modal(BuildingModal())
 
 # ================= ROTATION HELPERS =================
 
@@ -269,35 +277,36 @@ async def reminder_loop():
     sent_5am = None
 
     while not bot.is_closed():
-        now = datetime.now(uk)
-        today = now.date()
+        try:
+            now = datetime.now(uk)
+            today = now.date()
 
-        channel = bot.get_channel(REMINDER_CHANNEL_ID)
-        if not channel:
-            await asyncio.sleep(30)
-            continue
+            channel = bot.get_channel(REMINDER_CHANNEL_ID)
+            if not channel:
+                await asyncio.sleep(30)
+                continue
 
-        users_today = list(dict.fromkeys(get_users_for_date(today)))  # 🚫 extra safety layer
+            users_today = list(dict.fromkeys(get_users_for_date(today)))
 
-        emirates_users = [u for u in users_today if u == EMIRATES_ID]
-        other_users = [u for u in users_today if u != EMIRATES_ID]
+            emirates_users = [u for u in users_today if u == EMIRATES_ID]
+            other_users = [u for u in users_today if u != EMIRATES_ID]
 
-        # Midnight reminder
-        if now.hour == 0 and now.minute < 2 and sent_midnight != today:
-            if other_users:
-                msg = await build_message_for_users(today, other_users)
-                await channel.send(msg)
-            sent_midnight = today
+            if now.hour == 0 and now.minute < 2 and sent_midnight != today:
+                if other_users:
+                    msg = await build_message_for_users(today, other_users)
+                    await channel.send(msg)
+                sent_midnight = today
 
-        # 5am reminder
-        if now.hour == 5 and now.minute < 2 and sent_5am != today:
-            if emirates_users:
-                msg = await build_message_for_users(today, emirates_users)
-                await channel.send(msg)
-            sent_5am = today
+            if now.hour == 5 and now.minute < 2 and sent_5am != today:
+                if emirates_users:
+                    msg = await build_message_for_users(today, emirates_users)
+                    await channel.send(msg)
+                sent_5am = today
+
+        except Exception as e:
+            print("❌ Reminder loop error:", e)
 
         await asyncio.sleep(30)
-
 
 # ================= COMMANDS =================
 
