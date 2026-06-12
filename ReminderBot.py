@@ -2,7 +2,7 @@ import discord
 from discord.ext import commands
 from discord import app_commands
 from datetime import datetime, date, timedelta
-from zoneinfo import ZoneInfo
+import pytz
 import os
 import asyncio
 
@@ -35,7 +35,7 @@ MENTION_SCHEDULE = {
 
 DATE_OVERRIDES = {}
 
-uk = ZoneInfo("Europe/London")
+uk = pytz.timezone("Europe/London")
 
 intents = discord.Intents.default()
 intents.guilds = True
