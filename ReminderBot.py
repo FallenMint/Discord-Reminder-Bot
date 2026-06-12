@@ -387,7 +387,8 @@ async def on_ready():
     print(f"🚀 Logged in as {bot.user}")
     await bot.tree.sync(guild=guild_obj)
 
-    # 🚫 prevent multiple loops if reconnect happens
     if not hasattr(bot, "reminder_task_started"):
         bot.reminder_task_started = True
         bot.loop.create_task(reminder_loop())
+
+bot.run(BOT_TOKEN)
