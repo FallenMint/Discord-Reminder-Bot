@@ -21,16 +21,17 @@ REMINDER_CHANNEL_ID = 1383751887051821147
 CYCLE_START_DATE = date(2025, 12, 22)
 CYCLE_LENGTH = 14
 
-EMIRATES_ID = 1262105376095207526
+MINT_ID = 937130633610821674
+MONK_ID = 285344747743346688
 
 MENTION_SCHEDULE = {
-    "Monday":    [1262105376095207526],
-    "Tuesday":   [285344747743346688],
-    "Wednesday": [285344747743346688],
-    "Thursday":  [1262105376095207526],
-    "Friday":    [1262105376095207526],
-    "Saturday":  [1141335656044429322],
-    "Sunday":    [1141335656044429322],
+    "Monday": [MINT_ID],
+    "Tuesday": [MONK_ID],
+    "Wednesday": [MONK_ID],
+    "Thursday": [MINT_ID],
+    "Friday": [MINT_ID],
+    "Saturday": [MINT_ID],
+    "Sunday": [MINT_ID],
 }
 
 DATE_OVERRIDES = {}
