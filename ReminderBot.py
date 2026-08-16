@@ -275,7 +275,7 @@ async def reminder_loop():
     await bot.wait_until_ready()
 
     sent_midnight = None
-    sent_5am = None
+    sent_8am = None
 
     while not bot.is_closed():
         try:
@@ -289,20 +289,20 @@ async def reminder_loop():
 
             users_today = list(dict.fromkeys(get_users_for_date(today)))
 
-            emirates_users = [u for u in users_today if u == EMIRATES_ID]
-            other_users = [u for u in users_today if u != EMIRATES_ID]
+            monk_users = [u for u in users_today if u == MONK_ID]
+            mint_users = [u for u in users_today if u == MINT_ID]
 
             if now.hour == 0 and now.minute < 2 and sent_midnight != today:
-                if other_users:
-                    msg = await build_message_for_users(today, other_users)
+                if monk_users:
+                    msg = await build_message_for_users(today, monk_users)
                     await channel.send(msg)
                 sent_midnight = today
 
-            if now.hour == 5 and now.minute < 2 and sent_5am != today:
-                if emirates_users:
-                    msg = await build_message_for_users(today, emirates_users)
+            if now.hour == 8 and now.minute < 2 and sent_8am != today:
+                if mint_users:
+                    msg = await build_message_for_users(today, mint_users)
                     await channel.send(msg)
-                sent_5am = today
+                sent_8am = today
 
         except Exception as e:
             print("Reminder loop error:", e)
